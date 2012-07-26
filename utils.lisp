@@ -4,7 +4,7 @@
 (in-package #:se.brinkhoff.colorimetric-utils)
 
 (defmacro define-simple-array-constant (name type &body value)
-  `(progn
+  `(eval-when (:execute :compile-toplevel :load-toplevel)
      (declaim (type (simple-array ,type (,(length value))) ,name))
      (defconstant ,name
        ,(make-array
