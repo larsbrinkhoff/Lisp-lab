@@ -1,7 +1,7 @@
 (defpackage #:se.brinkhoff.osa-radial-sampling
   (:use #:cl)
   (:nicknames #:osa-radial)
-  (:export))
+  (:export #:*data*))
 
 (in-package #:se.brinkhoff.osa-radial-sampling)
 

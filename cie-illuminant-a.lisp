@@ -2,13 +2,13 @@
   (:use #:cl)
   (:import-from #:se.brinkhoff.colorimetric-utils
 		#:define-simple-array-constant)
-  (:export #:*data*))
+  (:export #:+data+))
 
 (in-package #:se.brinkhoff.cie-illuminant-a)
 
 ;;; 300-830 nm
 ;;; White point 0.44757 0.40745 / 0.45117 0.40594.
-(define-simple-array-constant *data* single-float
+(define-simple-array-constant +data+ single-float
   .930483 .967643 1.00597 1.04549 1.08623
   1.12821 1.17147 1.21602 1.26188 1.30910
   1.35769 1.40768 1.45910 1.51198 1.56633

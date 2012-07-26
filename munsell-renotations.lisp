@@ -1,7 +1,7 @@
 (defpackage #:se.brinkhoff.munsell-renotations
   (:use #:cl)
   (:nicknames #:munsell)
-  (:export))
+  (:export #:*real* #:*all*))
 
 (in-package #:se.brinkhoff.munsell-renotations)
 
