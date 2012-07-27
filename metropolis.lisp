@@ -1297,24 +1297,29 @@
 			  (%wavelength-response
 			   result
 			   (coerce wavelength 'fast-float)
-			   (getf `(:x ,*cie-x*
+			   (getf ;;#+(or)
+				 `(:x ,se.brinkhoff.cie-1964-xyz:*x*
+				   :y ,se.brinkhoff.cie-1964-xyz:*y*
+				   :z ,se.brinkhoff.cie-1964-xyz:*z*)
+				 #+(or)
+				 `(:x ,*cie-x*
 				   :y ,*cie-y*
 				   :z ,*cie-z*)
 				 type))
 			  (aref result)))
     ((real 0 *)		0)))
 
-(defun rgb-luminosity (r g b)
+(defun srgb-luminosity (r g b)
   (+ (* 0.212671 r) (* 0.715160 g) (* 0.072169 b)))
 
 (defmacro with-preserved-luminosity ((r g b) &body body)
   (let ((x (gensym))
 	(y (gensym)))
-    `(let ((,y (rgb-luminosity ,r ,g ,b)))
+    `(let ((,y (srgb-luminosity ,r ,g ,b)))
        (multiple-value-prog1 (locally ,@body)
 	 (if (zerop ,y)
 	     (setf ,r 0 ,g 0 ,b 0)
-	     (let ((,x (/ ,y (rgb-luminosity ,r ,g ,b))))
+	     (let ((,x (/ ,y (srgb-luminosity ,r ,g ,b))))
 	       (setf ,r (* ,x ,r))
 	       (setf ,g (* ,x ,g))
 	       (setf ,b (* ,x ,b))))))))
@@ -1517,8 +1522,6 @@
 			      (with-preserved-luminosity (r g b)
 				(setf (values r g b)
 				      (clamp-towards-grey r g b)))
-			      (setf (values r g b)
-				    (clamp-towards-white r g b))
 			      #+(or)
 			      (let ((w (min 0.0 r g b)))
 				(when (minusp w)
@@ -2840,7 +2843,7 @@ list => 67.30 seconds.
 	     ;;(setf (values r g b) (clamp-uniformly-towards-grey r g b))
 	     #+(or)
 	     (let ((x 0.5)
-		   (w (rgb-luminosity r g b)))
+		   (w (srgb-luminosity r g b)))
 	       (setf r (+ (* x r) (* (- 1 x) w)))
 	       (setf g (+ (* x g) (* (- 1 x) w)))
 	       (setf b (+ (* x b) (* (- 1 x) w))))
@@ -2853,7 +2856,6 @@ list => 67.30 seconds.
 			     (round (* 450 x2*))
 			     (round (- 400 (* 450 y2*)))))))))))
 
-#|
 (defun draw-munsell (&key (white-x 0.3127) (white-y 0.3290)
 		     (width 350) (height (* 8/7 width)))
   (with-window (:width width :height height)
@@ -2902,7 +2904,6 @@ list => 67.30 seconds.
 		     (draw-line (window-x x1) (window-y y1)
 				(window-x x2) (window-y y2)))
 		   (setq x1 x2 y1 y2))))))))))
-|#
 
 (defun draw-osa-sampling (&key (white-x 0.3127) (white-y 0.3290)
 			  (width 350) (height (* 8/7 width)))
@@ -3071,12 +3072,6 @@ list => 67.30 seconds.
 	(* 12.92 x)
 	(- (* (1+ a) (expt x 1/gamma) ) a))))
 
-(defmacro with-inverted-color ((r g b) &body body)
-  `(progn
-     (setf ,r (- 1 ,r) ,g (- 1 ,g) ,b (- 1 ,b))
-     (multiple-value-prog1 (locally ,@body)
-       (setf ,r (- 1 ,r) ,g (- 1 ,g) ,b (- 1 ,b)))))
-
 (defmacro with-monitor-colors ((r g b &key (gamma :srgb)) &body body)
   (flet ((gamma-correct (x)
 	   (etypecase gamma
@@ -3152,12 +3147,6 @@ list => 67.30 seconds.
     (values (- r w)
 	    (- g w)
 	    (- b w))))
-    
-(defun clamp-towards-white (r g b)
-  (with-inverted-color (r g b)
-    (with-preserved-luminosity (r g b)
-      (setf (values r g b) (clamp-towards-grey r g b))))
-  (values r g b))
 
 ;;; 360 nm => 0.17556,   0.0052938
 ;;; 404 nm => 0.17310,   0.0047740
@@ -3168,6 +3157,7 @@ list => 67.30 seconds.
 ;;; max rgb = ( 1.97441  1.87293  1.05731) @ ~605 nm
 
 (defun draw-cie-xy ()
+  (declare (optimize debug))
   (let* ((width 600)
 	 (height 600))
     (labels ((wavelength-x (nm)
@@ -3197,7 +3187,8 @@ list => 67.30 seconds.
 			 (x2 (wavelength-x 830))
 			 (y2 (wavelength-y 830)))
 		     (+ (* (- x2 x1) (/ (- y y1) (- y2 y1))) x1)))))
-      (with-window (:width (round (* .75 width)) :height (round (* .85 height)))
+      (with-window (:width (round (* .75 width))
+		    :height (round (* .85 height)))
 	(loop for y from 0 below height
 	      for y* = (- .85 (/ y height))
 	      for x1 = (round (* width (y-xmin y*)))
@@ -3215,14 +3206,15 @@ list => 67.30 seconds.
 		      (with-preserved-luminosity (r g b)
 			(setf (values r g b) (clamp-towards-grey r g b)))
 		      #+(or)
+		      (let ((x (min r g b)))
+			(decf r x)
+			(decf g x)
+			(decf b x))
+		      #+(or)
 		      (let ((x (max r g b)))
 			(setf r (/ r x))
 			(setf g (/ g x))
 			(setf b (/ b x)))
-		      #+(or)
-		      (with-inverted-color (r g b)
-			(with-preserved-luminosity (r g b)
-			  (setf (values r g b) (clamp-towards-grey r g b))))
 		      (setf (values r g b) (clamp-to-one r g b))
 		      (with-monitor-colors (r g b)
 			(draw-point x y r g b))
@@ -3244,11 +3236,17 @@ list => 67.30 seconds.
       (setf x (+ (* a x) (* (- 1 a) (* y wx))))
       (setf z (+ (* a z) (* (- 1 a) (* y wz)))))
     (multiple-value-bind (r g b) (xyz-to-rgb x y z)
-      ;;#+(or)
-      (let ((x 0.089)) ;0.36757))
+      #+(or)
+      (let ((x #+(or) 0.089 0.36757))
 	(setf r (/ (+ r x) (1+ x)))
 	(setf g (/ (+ g x) (1+ x)))
 	(setf b (/ (+ b x) (1+ x))))
+      #+(or)
+      (let ((x1 0.089)
+	    (x2 0.36757))
+	(setf r (/ (+ r x2) (1+ x2)))
+	(setf g (/ (+ g x1) (1+ x1)))
+	(setf b (/ (+ b x1) (1+ x1))))
       #+(or)
       (with-preserved-luminosity (r g b)
 	(setf (values r g b) (clamp-to-zero r g b)))
@@ -3261,9 +3259,7 @@ list => 67.30 seconds.
       #+(or)
       (with-preserved-luminosity (r g b)
 	(setf (values r g b) (clamp-uniformly-towards-grey r g b)))
-      #+(or)
-      (setf (values r g b) (clamp-towards-white r g b))
-      #+(or)
+      ;;#+(or)
       (setf (values r g b) (clamp-to-one r g b))
       (values r g b))))
 
@@ -3359,13 +3355,7 @@ list => 67.30 seconds.
 (defun plot-rgb ()
   (plot-function (list (lambda (x) (nth-value 0 (wavelength-rgb x)))
 		       (lambda (x) (nth-value 1 (wavelength-rgb x)))
-		       (lambda (x) (nth-value 2 (wavelength-rgb x)))
-		       #+(or)
-		       (lambda (x)
-			 (apply
-			  #'rgb-luminosity
-			  (multiple-value-list
-			   (wavelength-rgb x)))))
+		       (lambda (x) (nth-value 2 (wavelength-rgb x))))
 		 400 700
 		 :print-stats t
 		 :width 400
@@ -3390,7 +3380,7 @@ list => 67.30 seconds.
 			   400)
 			  300))
 		       (lambda (x)
-			 (apply #'rgb-luminosity
+			 (apply #'srgb-luminosity
 				(multiple-value-list
 				 (wavelength-rgb x))))
 		       (lambda (x)
@@ -3421,6 +3411,45 @@ list => 67.30 seconds.
 		(multiple-value-bind (r g b) (wavelength-rgb nm)
 		  (with-monitor-colors (r g b)
 		    (draw-line x 0 x (1- height) r g b))))))))
+
+(defun lerp (x1 x2 y)
+  (+ x1 (* (mod y 1) (- x2 x1))))
+
+(defun draw-optimal-colors ()
+  (let ((width 600/2)
+	(height 400/2)
+	(blue 400)
+	(red 680))
+    (with-window (:width width :height height)
+      (loop for y below height
+	    for w = (lerp 0.5 0 (/ y height)) do
+	    (flet ((foo (fn)
+		     (loop for x below width
+			   for x2 = (lerp blue red (- (/ x width) w))
+			   for y2 = (lerp blue red (+ (/ x width) w)) do
+			   (loop for nm from blue to red
+				 when (or (and (< x2 y2) (< x2 nm y2))
+					  (and (> x2 y2) (not (< y2 nm x2))))
+				 sum (wavelength-response :x nm) into x* and
+				 sum (wavelength-response :y nm) into y* and
+				 sum (wavelength-response :z nm) into z*
+				 finally
+				 (multiple-value-call
+				  fn x y (xyz-to-rgb x* y* z*))))))
+	      (let ((max 0))
+		(foo (lambda (x y r g b)
+		       (declare (ignore x y))
+		       (setf max (max max r g b))))
+		(print max)
+		(when (zerop max)
+		  (setq max 1))
+		(foo (lambda (x y r g b)
+		       (setf r (/ r max) g (/ g max) b (/ b max))
+		       (with-preserved-luminosity (r g b)
+			 (setf (values r g b) (clamp-towards-grey r g b)))
+		       (with-monitor-colors (r g b)
+			 (draw-point x y r g b))))))
+	    (finish-output (ltk:wish-stream *wish*))))))
 
 (defun profile (x)
   (let ((file #.*load-pathname*))
