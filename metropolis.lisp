@@ -14,10 +14,13 @@
 |#
 
 (require :ltk)
+(require :hdri-io)
+(require :utah-teapot)
+(require :colorimetric-data)
 ;(require :mt19937)
 
 (defpackage :metro
-  (:use :cl :ltk :se.brinkhoff.cie-1931-xyz))
+  (:use :cl :ltk :se.brinkhoff.colorimetric-data))
 
 (in-package :metro)
 
@@ -475,9 +478,7 @@
 		      (cz (- oz (* ao/aa az))))
 		  (let* ((b2 (+ (* bx bx) (* by by) (* bz bz)))
 			 (bc (+ (* bx cx) (* by cy) (* bz cz)))
-			 (_bc/b2 (/ bc b2))
 			 (c2 (+ (* cx cx) (* cy cy) (* cz cz)))
-			 (_r2-c2/b2 (/ (- (* (r1 pipe) (r1 pipe)) c2) b2))
 
 			 (r1 (the fast-float (r1 pipe)))
 			 (r2 (the fast-float (r2 pipe)))
@@ -543,35 +544,6 @@
 	      (vec (+ (max p1x p2x) r1)
 		   (+ (max p1y p2y) r1)
 		   (+ (max p1z p2z) r1)))))))
-
-(defclass torus (shape)
-  ((p :initarg :p :accessor p)
-   (r1 :initarg :r1 :accessor r1)
-   (r2 :initarg :r2 :accessor r2)))
-
-(defmethod intersect ((torus torus) ray)
-  (let ((t 0.0))
-    (with-vec (px py pz) (ray-pos ray)
-      (decf px (vec-x (p torus)))
-      (decf py (vec-y (p torus)))
-      (decf pz (vec-z (p torus)))
-      (with-vec (dx dy dz) (ray-dir ray)
-	(macrolet ((len (x y)
-		     `(sqrt (+ (* ,x x) (* ,y ,y)))))
-	  (loop while t do
-	       (let ((d (- (len (- (len px py) (r1 torus)) pz) (r2 torus))))
-		 (incf t d)
-		 (incf px (* d dx))
-		 (incf py (* d dy))
-		 (incf pz (* d dz)))))))))
-
-(defmethod normal ((torus torus) pos)
-  (with-vec (px py pz) pos
-    (let ((x (- 1 (/ (r1 torus) (sqrt (+ (* px px) (* py py)))))))
-      (normalize (vec (* x px) (* x py) pz)))))
-
-(defmethod bounding-box ((torus torus))
-  nil)
 
 (defmethod bounding-box ((objects list))
   (let ((minx 1e30)
@@ -701,8 +673,8 @@
     (declare (ignorable b))
     ;;#+(or)
     `(progn
-       (unless ,r1 (setf ,r1 (random 1.0)))
-       (unless ,r2 (setf ,r2 (random 1.0)))
+       ;(unless ,r1 (setf ,r1 (random 1.0)))
+       ;(unless ,r2 (setf ,r2 (random 1.0)))
       (let ((,a (random 1.0))
 	    (,z (- (* 2.0 (random 1.0)) 1.0)))
 	(declare (type (fast-float 0.0 1.0) ,a))
@@ -1284,7 +1256,7 @@
   (declare (optimize (speed 3) (safety 0) (debug 0))
 	   (type box result)
 	   (type (fast-float 360.0 830.0) wavelength)
-	   (type #.(type-of *cie-x*) table))
+	   (type #.(type-of +cie-1931-x+) table))
   (let ((i (floor wavelength))
 	(j (floor (1+ wavelength))))
     (setf (aref result) (+ (* (- 1 (- wavelength i)) (aref table (- i 360)))
@@ -1298,13 +1270,13 @@
 			   result
 			   (coerce wavelength 'fast-float)
 			   (getf ;;#+(or)
-				 `(:x ,se.brinkhoff.cie-1964-xyz:*x*
-				   :y ,se.brinkhoff.cie-1964-xyz:*y*
-				   :z ,se.brinkhoff.cie-1964-xyz:*z*)
+				 `(:x ,+cie-1964-x+
+				   :y ,+cie-1964-y+
+				   :z ,+cie-1964-z+)
 				 #+(or)
-				 `(:x ,*cie-x*
-				   :y ,*cie-y*
-				   :z ,*cie-z*)
+				 `(:x ,+cie-1931-x+
+				   :y ,+cie-1931-y+
+				   :z ,+cie-1931-z+)
 				 type))
 			  (aref result)))
     ((real 0 *)		0)))
@@ -1394,11 +1366,11 @@
 			   (reset-pointer samples)
 			   (let ((q (* (aref result) (ray-weight ray)))
 				 (nm (ray-nm ray)))
-			     (%wavelength-response result nm *cie-x*)
+			     (%wavelength-response result nm +cie-1931-x+)
 			     (incf cie-x (* q (aref result)))
-			     (%wavelength-response result nm *cie-y*)
+			     (%wavelength-response result nm +cie-1931-y+)
 			     (incf cie-y (* q (aref result)))
-			     (%wavelength-response result nm *cie-z*)
+			     (%wavelength-response result nm +cie-1931-z+)
 			     (incf cie-z (* q (aref result)))))
 			 finally
 			 (let ((avg-x (* 1/rpp (the fast-float cie-x)))
@@ -1437,9 +1409,9 @@
 			   (reset-pointer samples2)
 			   (let ((q (aref result))
 				 (nm (- (the fixnum (round (ray-nm ray))) 360)))
-			     (incf cie-x (* q (aref *cie-x* nm)))
-			     (incf cie-y (* q (aref *cie-y* nm)))
-			     (incf cie-z (* q (aref *cie-z* nm)))))
+			     (incf cie-x (* q (aref +cie-1931-x+ nm)))
+			     (incf cie-y (* q (aref +cie-1931-y+ nm)))
+			     (incf cie-z (* q (aref +cie-1931-z+ nm)))))
 			 finally
 			 (let ((avg-x (* 1/rpp (the fast-float cie-x)))
 			       (avg-y (* 1/rpp (the fast-float cie-y)))
@@ -2194,13 +2166,13 @@
                             rays: ~A"
 			   seconds *primary-rays* *shadow-rays* *rays*)))
 	;;#+(or)
-	(hdri:write "/tmp/tmp.exr" array :description description)
+	(hdri-io:write "/tmp/tmp.exr" array :description description)
 	;;#+(or)
-	(hdri:write "/tmp/tmp.hdr" array :description description)
+	(hdri-io:write "/tmp/tmp.hdr" array :description description)
 	;;#+(or)
-	(hdri:write "/tmp/tmp.pfs" array :description description)
+	(hdri-io:write "/tmp/tmp.pfs" array :description description)
 	;;#+(or)
-	(hdri:write "/tmp/tmp.pfm" array :description description)
+	(hdri-io:write "/tmp/tmp.pfm" array :description description)
 	(format t "~&Time:                     ~,2F seconds (~A).~@
                      Primary rays:             ~A.~@
                      Shadow rays:              ~A.~@
@@ -2320,11 +2292,11 @@
 			   (reset-pointer samples)
 			   (let ((q (* (aref result) (ray-weight ray)))
 				 (nm (ray-nm ray)))
-			     (%wavelength-response result nm *cie-x*)
+			     (%wavelength-response result nm +cie-1931-x+)
 			     (incf cie-x (* q (aref result)))
-			     (%wavelength-response result nm *cie-y*)
+			     (%wavelength-response result nm +cie-1931-y+)
 			     (incf cie-y (* q (aref result)))
-			     (%wavelength-response result nm *cie-z*)
+			     (%wavelength-response result nm +cie-1931-z+)
 			     (incf cie-z (* q (aref result)))))
 			 finally
 			   (setf (aref array (+ (* 3 x) 0) y) cie-x)
@@ -2342,13 +2314,13 @@
                             rays: ~A"
 			   seconds *primary-rays* *shadow-rays* *rays*)))
 	;;#+(or)
-	(hdri:write "/tmp/tmp.exr" array :description description)
+	(hdri-io:write "/tmp/tmp.exr" array :description description)
 	;;#+(or)
-	(hdri:write "/tmp/tmp.hdr" array :description description)
+	(hdri-io:write "/tmp/tmp.hdr" array :description description)
 	;;#+(or)
-	(hdri:write "/tmp/tmp.pfs" array :description description)
+	(hdri-io:write "/tmp/tmp.pfs" array :description description)
 	;;#+(or)
-	(hdri:write "/tmp/tmp.pfm" array :description description)
+	(hdri-io:write "/tmp/tmp.pfm" array :description description)
 	(format t "~&Time:                     ~,2F seconds (~A).~@
                      Primary rays:             ~A.~@
                      Shadow rays:              ~A.~@
@@ -2371,9 +2343,9 @@
 	   (loop for nm from 360 to 830
 		 sum (* (funcall fn nm)
 			(aref array (round (- nm 360)))))))
-    (let ((cie-x (integral *cie-x*))
-	  (cie-y (integral *cie-y*))
-	  (cie-z (integral *cie-z*)))
+    (let ((cie-x (integral +cie-1931-x+))
+	  (cie-y (integral +cie-1931-y+))
+	  (cie-z (integral +cie-1931-z+)))
       (let ((ntsc-r (+ (*  1.967 cie-x) (* -0.548 cie-y) (* -0.297 cie-z)))
 	    (ntsc-g (+ (* -0.955 cie-x) (*  1.938 cie-y) (* -0.027 cie-z)))
 	    (ntsc-b (+ (*  0.064 cie-x) (* -0.130 cie-y) (*  0.982 cie-z))))
@@ -2890,16 +2862,18 @@ list => 67.30 seconds.
 	(loop for hue in (remove-if-not
 			  (lambda (x) (eql (aref (symbol-name x) 0) '#\5))
 			  (remove-duplicates
-			   (loop for (hue) in munsell::*real* collect hue))) do
+			   (loop for (hue) in *real-munsell-renotations* collect hue))) do
 	  (loop for chroma from 2 to 50 by 2
 	     with x1 = nil and y1 = nil do
 	     (let ((color (find-if
 			   (lambda (col)
 			     (destructuring-bind (h v c x y yy) col
+			       (declare (ignore x y yy))
 			       (and (eq h hue) (eql c chroma) (eql v value))))
-			   munsell::*real*)))
+			   *real-munsell-renotations*)))
 	       (when color
 		 (destructuring-bind (h v c x2 y2 yy) color
+		   (declare (ignore h v c yy))
 		   (when x1
 		     (draw-line (window-x x1) (window-y y1)
 				(window-x x2) (window-y y2)))
@@ -2940,9 +2914,11 @@ list => 67.30 seconds.
 		(remove-if-not
 		 (lambda (col)
 		   (destructuring-bind (l j g x y z) col
+		     (declare (ignore j g x y z))
 		     (= value L)))
-		 osa-radial::*data*) do
+		 *osa-ucs-radial-sampling*) do
 		(destructuring-bind (l j g x y z) color
+		  (declare (ignore l j g))
 		  (print (list x y z))
 		  (draw-cross  (window-x (/ x (+ x y z)))
 			       (window-y (/ y (+ x y z))))))))))
@@ -3002,14 +2978,14 @@ list => 67.30 seconds.
 	(loop for hue in (remove-if-not
 			  (lambda (x) t);(eql (aref (symbol-name x) 0) #\5))
 			  (remove-duplicates
-			   (loop for (hue) in munsell::*real* collect hue))) do
+			   (loop for (hue) in *real-munsell-renotations* collect hue))) do
 	  (loop for chroma from 2 to 50 by 2
 	     with a1 = nil and b1 = nil do
 	     (let ((color (find-if
 			   (lambda (col)
 			     (destructuring-bind (h v c x y yy) col
 			       (and (eq h hue) (eql c chroma) (eql v value))))
-			   munsell::*real*)))
+			   *real-munsell-renotations*)))
 	       (when color
 		 (destructuring-bind (h v c x y yy) color
 		   (multiple-value-bind (l a b) (xyz-to-cielab
@@ -3023,6 +2999,7 @@ list => 67.30 seconds.
 |#
 
 (defun draw-cie-xz (&key (white-x 0.3127) (white-y 0.3290))
+  (declare (ignorable white-x white-y))
   (with-window (:width 450 :height 450)
     (loop for nm from 400 to 700 by 3 do
       (let* ((x (wavelength-response :x nm))
