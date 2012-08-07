@@ -2941,6 +2941,21 @@ list => 67.30 seconds.
 	   (b* (* 200 (- fy* (f z*)))))
       (values L* a* b*))))
 
+(defun xyz-to-cieluv (x y z &key (white-x 0.3127) (white-y 0.3290)
+		                 (white-luminance 1.0))
+  (flet ((u (x y z) (/ (* 4 x) (+ x (* 15 y) (* 3 z))))
+	 (v (x y z) (/ (* 9 y) (+ x (* 15 y) (* 3 z))))
+	 (f (y/yn) (if (<= y/yn (expt 6/29 3))
+		       (* (expt 29/3 3) y/yn)
+		       (- (* 116 y/yn) 16))))
+    (let* ((wx (* white-luminance (/ white-x white-y)))
+	   (wy white-luminance)
+	   (wz (* white-luminance (/ (- 1 white-x white-y) white-y)))
+	   (L* (f (/ y wy)))
+	   (u* (* 13 L* (- (u x y z) (u wx wy wz))))
+	   (v* (* 13 L* (- (v x y z) (v wx wy wz)))))
+      (values L* u* v*))))
+
 #|
 (defun draw-cielab-munsell (&key (white-x 0.3127) (white-y 0.3290)
 			    (width 600) (height 600))
