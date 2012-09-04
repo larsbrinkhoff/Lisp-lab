@@ -70,6 +70,7 @@
       form)))
 
 (defun map-subforms (fn form &key recursive env)
+  (declare (ignore env))
   (when (atom form)
     (return-from map-subforms form))
   (multiple-value-bind (form *toplevel-form*)
@@ -115,8 +116,12 @@
   (setq forms
 	(mapcan (lambda (form)
 		  (typecase form
-		    ((list-of (eql progn) . list)	(cdr form))
-		    (t					(list form))))
+		    ((cons (eql progn))
+		     (let ((x (body-form (rest form))))
+		       (typecase x
+			 ((cons (eql progn))	(rest x))
+			 (t			(list x)))))
+		    (t				(list form))))
 		forms))
   (typecase forms
     (null		nil)
@@ -169,22 +174,6 @@
 		  (when (symbolp z)
 		    (pushnew z vars)))))))))
 
-(deftype let-form () '(list-of (eql let) list . list))
-(deftype let*-form () '(list-of (eql let*) list . list))
-(deftype lambda-expr () '(list-of (eql lambda) list . list))
-(deftype lambda-form () '(list-of lambda-expr . list))
-(deftype function-name () '(or symbol (list-of (eql setf) symbol)))
-(deftype function-form (&optional (arg '(or function-name lambda-expr)))
-  `(list-of (eql function) ,arg))
-(deftype special-form () '(cons (satisfies special-operator-p)))
-
-(deftype variable-binding-form ()
-  '(or let-form let*-form lambda-form (function-form lambda-expr)))
-
-(defmacro with-gensyms (vars &body body)
-  `(let ,(mapcar (lambda (var) `(,var (gensym))) vars)
-     ,@body))
-
 (defmacro destructuring-typecase (form &body clauses)
   (let ((x (gensym)))
     `(let ((,x ,form))
@@ -196,30 +185,42 @@
 			   ,@body))))
 	       clauses)))))
 
-(defun declare-ignore-walk (vars form)
-  (map-subforms
-   (lambda (subform e) (declare-ignore-walk vars subform))
-   (destructuring-typecase (macroexpand form)
-     ((or let-form let*-form) (let bindings &rest body)
-       (let ((ignored (intersection vars (let-variables bindings))))
-	 `(,let ,bindings (declare (ignore ,@ignored)) ,@body)))
-     (lambda-form ((_ lambda-list &rest body) &rest forms)
-       (let ((ignored (intersection vars (lambda-list-variables lambda-list))))
-	 `((lambda ,lambda-list (declare (ignore ,@ignored)) ,@body) ,@forms)))
-     ((function-form lambda-expr) (_ (__ lambda-list &rest body))
-       (let ((ignored (intersection vars (lambda-list-variables lambda-list))))
-	 `(function (lambda ,lambda-list (declare (ignore ,@ignored)) ,@body))))
-     (t x
-       x))))
+#+swank
+(eval-when (:execute :load-toplevel)
+  (swank::send-to-emacs
+   '(:indentation-update (("larsb-foo" (4 "&rest" ("&whole" 2 4 "&rest" 2)))))))
 
-(defmacro declare-ignore (vars &body body)
-  `(progn ,@(loop for form in body collect (declare-ignore-walk vars form))))
+(defun indent-destructuring-typecase (path state indent-point
+				      sexp-column normal-indent)
+  (case (car path)
+    (1		(+ sexp-column 4))
+    (t		(cond ((null (cdr path))	(+ sexp-column 2))
+		      ((cddr path)		normal-indent)
+		      ((eq (cadr path) 1)	(+ sexp-column 4))
+		      (t		(+ sexp-column 2))))))
+
+(deftype let-form () '(list-of (eql let) list . list))
+(deftype let*-form () '(list-of (eql let*) list . list))
+(deftype lambda-expr () '(list-of (eql lambda) list . list))
+(deftype lambda-form () '(list-of lambda-expr . list))
+(deftype function-name () '(or symbol (list-of (eql setf) symbol)))
+(deftype function-form (&optional (arg '(or function-name lambda-expr)))
+  `(list-of (eql function) ,arg))
+(deftype special-form () '(cons (satisfies special-operator-p)))
+
+(deftype variable-binding-form (&rest operators)
+  (let ((op-forms '((let . let-form)
+		    (let* . let*-form)
+		    (lambda . lambda-form)
+		    (function . (function-form lambda-expr)))))
+    `(or ,@(mapcar (lambda (op) (cdr (assoc op op-forms)))
+		   (or operators '(let let* lambda function))))))
 
 (defun let-variables (bindings)
-  (mapcar (lambda (x)
-	    (etypecase x
-	      (symbol		x)
-	      ((cons symbol)	(car x))))
+  (mapcar (lambda (b)
+	    (etypecase b
+	      (symbol				b)
+	      ((cons symbol)			(car b))))
 	  bindings))
 
 (defun lambda-list-variables (lambda-list)
@@ -227,14 +228,120 @@
 	    (etypecase x
 	      (symbol				x)
 	      ((cons symbol)			(car x))
-	      ((cons (list-of keyword symbol))	(cadar x))))
+	      ((cons (list-of symbol symbol))	(cadar x))))
 	  (remove-if (lambda (x) (member x lambda-list-keywords))
 		     lambda-list)))
 
-(deftype declaration-expr () '(cons (eql declare) list))
-(defvar *doc-allowed*)
-(defun doc-allowed (x) *doc-allowed*)
-(deftype doc-string () '(and string (satisfies doc-allowed)))
+(defun binding-form-variables (form)
+  (destructuring-typecase form
+    ((variable-binding-form let let*) (_ bindings &rest body)
+      (declare (ignore _ body))
+      (let-variables bindings))
+    (lambda-form ((_ lambda-list &rest body) &rest forms)
+      (declare (ignore _ body forms))
+      (lambda-list-variables lambda-list))
+    ((function-form lambda-expr) (_ (__ lambda-list &rest body))
+      (declare (ignore _ __ body))
+      (lambda-list-variables lambda-list))
+    (t x
+      (error "Not a variable binding form: ~S" x))))
+
+(defmacro with-gensyms (vars &body body)
+  `(let ,(mapcar (lambda (var) `(,var (gensym))) vars)
+     ,@body))
+
+(defun form-body (form &optional env)
+  (destructuring-typecase (macroexpand form env)
+    (symbol _
+      (values))
+    ((cons (member if go load-time-value quote return-from setq
+		   multiple-value-call the throw progv))
+        _
+      (values))
+    ((function-form function-name) _
+      (values))
+    ((cons (member locally progn tagbody)) (_ &rest body)
+      body)
+    ((cons (member block catch eval-when let let* multiple-value-prog1
+		   symbol-macrolet unwind-protect))
+        (_ __ &rest body)
+      body)
+    (function-binding-form (_ bindings &rest body)
+      (values body (mapcar (lambda (b) (nthcdr 2 b)) bindings)))
+    ((function-form lambda-expr) (_ (__ ___ &rest body))
+      body)
+    ((and (cons symbol) special-form) x
+      (error "Unknown special form: ~A" x))
+    (lambda-form ((_ __ &rest body) &rest ___)
+      body)
+    ((cons symbol list) _
+      (values))
+    (cons x
+      (error "Malformed: ~A" x))
+    (t _
+      (values))))
+
+(defun (setf form-body) (body form &optional env)
+  (declare (ignore env))
+  (typecase form
+    (symbol
+      body)
+    ((cons (member if go load-time-value quote return-from setq
+		   multiple-value-call the throw progv))
+      body)
+    ((function-form function-name)
+      body)
+    ((cons (member locally progn tagbody))
+      (setf (cdr form) body))
+    ((cons (member block catch eval-when flet labels let let* macrolet
+		   multiple-value-prog1 symbol-macrolet unwind-protect))
+      (setf (cddr form) body))
+    ((function-form lambda-expr)
+      (setf (cddadr form) body))
+    ((and (cons symbol) special-form)
+      (error "Unknown special form: ~A" form))
+    (lambda-form
+      (setf (cddar form) body))
+    ((cons symbol list)
+      body)
+    (cons
+      (error "Malformed: ~A" form))
+    (t
+      body)))
+
+(defmacro declare-ignore (vars &body body &environment env)
+  (body-form
+   (mapcar
+    (lambda (form)
+      (map-subforms
+       (lambda (subform e)
+	 (declare (ignore e))
+	 `(declare-ignore ,vars ,subform))
+       (destructuring-typecase (macroexpand form env)
+	 (variable-binding-form x
+	   (setf x (copy-tree x))
+	   (push `(declare (ignore ,@(intersection vars (binding-form-variables x))))
+		 (form-body x))
+	   x)
+	 (t x
+	   x))))
+    body)))
+
+(defmacro declare-ignore-1 (vars form &environment env)
+  (map-subforms
+   (lambda (subform e)
+     (declare (ignore e))
+     `(declare-ignore-1 ,vars ,subform))
+   (destructuring-typecase (macroexpand form env)
+     (variable-binding-form x
+       (setf x (copy-tree x))
+       (push `(declare (ignore ,@(intersection vars (binding-form-variables x))))
+	     (form-body x))
+       x)
+     (t x
+       x))))
+(defmacro declare-ignore (vars &body body)
+  (body-form (mapcar (lambda (x) `(declare-ignore-1 ,vars ,x)) body)))
 
 (defun form-bindings (form)
   (flet ((let-init-forms (bindings)
@@ -278,7 +385,7 @@
       (symbol
        (if (or (constantp x) (member x bound))
 	   nil
-	   `(cons ',x nil)))
+	   `(list ',x)))
       (variable-binding-form
        `(nconc ,@
 	 (loop for (forms variables) on (form-bindings x) by #'cddr
@@ -307,26 +414,19 @@
 (defun (setf closure-variable) (val fn var)
   (funcall (gethash fn *closure-hash*) var val))
 
-(defmacro step-subforms (form)
-  (map-subforms
-   (lambda (subform e)
-     `(progn
-	(format t "~&Subform: ~A" ',subform)
-	(read-line)
-	(step-subforms ,subform)))
-   form))
 (defmacro step-subforms (form &environment env)
-  (mapping-subforms (subform form env)
-    `(progn
-       (format t "~&Subform: ~A" ',subform)
-       (read-line)
-       (step-subforms ,subform))))
+  `(progn
+     (format t "~&Subform: ~A" ',form)
+     (read-line)
+     ,(map-subforms (lambda (subform env) `(step-subforms ,subform))
+		    form)))
 (defmacro step-subforms (form &environment env)
   `(progn
      (format t "~&Subform: ~A" ',form)
      (read-line)
      ,(mapping-subforms (subform form env)
         `(step-subforms ,subform))))
+
 (defmacro mapping-subforms ((subform form &optional (env (gensym) envp))
 			    &body body)
   `(map-subforms (lambda (,subform ,env)
@@ -355,14 +455,14 @@
 		 `(list ,@elts))))
     (destructuring-typecase x
       ((list-of (eql quote) t) (_ y)
-       (if (and (atom y) (constantp y)) y x))
+	(if (and (atom y) (constantp y)) y x))
       ((list-of (eql cons) t t) (_ car cdr)
-       (let ((car (simplify-quote car))
-	     (cdr (simplify-quote cdr)))
-	 (destructuring-typecase cdr
-	   (null _	(simplify-list (list car)))
-	   ((list-of (eql quote) list) (_ list)
-		        (if (constant-or-quoted-p car)
+	(let ((car (simplify-quote car))
+	      (cdr (simplify-quote cdr)))
+	  (destructuring-typecase cdr
+	    (null _	(simplify-list (list car)))
+	    ((list-of (eql quote) list) (_ list)
+			(if (constant-or-quoted-p car)
 			    `(quote (,(unquote car) ,@list))
 			    `(cons ,car ,cdr)))
 	   ((list-of (eql list) . list) (_ . list)
@@ -417,6 +517,11 @@
 					    ,@forms))))))
 	 (,fn ,@(mapcar (lambda (val) (if (symbolp val) nil (second val)))
 			bindings))))))
+
+(deftype declaration-expr () '(cons (eql declare) list))
+(defvar *doc-allowed*)
+(defun doc-allowed (x) *doc-allowed*)
+(deftype doc-string () '(and string (satisfies doc-allowed)))
 
 (defun parse-body (body &optional *doc-allowed*)
   (destructuring-typecase body
@@ -504,10 +609,10 @@
         `(symbol-macrolet ,bindings ,@(map-body body)))
       ((cons (eql tagbody)) (_ &rest tags-and-forms)
         `(tagbody ,@(mapcar (lambda (x)
-      			    (typecase x
-      			      ((or symbol integer)	x)
-      			      (t			(map-form x))))
-      			  tags-and-forms)))
+			      (typecase x
+				((or symbol integer)	x)
+				(t			(map-form x))))
+			    tags-and-forms)))
       ((cons (eql the)) (_ type form)
         `(the ,type ,(map-form form)))
       ((cons (eql throw)) (_ tag form)
@@ -530,6 +635,9 @@
 	         progn progv throw unwind-protect)))
 (deftype operator-with-arg-and-forms ()
   '(cons (member block eval-when function go quote return-from the)))
+
+(deftype function-binding-form (&rest operators)
+  `(list-of (member ,@(or operators '(flet labels macrolet))) list . list))
 
 (defmacro %map-subforms (fn form &key toplevel recursive &environment env)
   (labels ((map-form (form)
@@ -555,7 +663,9 @@
 	      (lambda (b)
 		(destructuring-bind (name lambda-list . body) b
 		  `(,name ,lambda-list ,@(map-body body))))
-	      bindings)))
+	      bindings))
+	   (map-lambda-list (lambda-list)
+	     lambda-list))
     (quote-tree
      (let ((mapped-form
       (destructuring-typecase (macroexpand form env)
@@ -565,12 +675,12 @@
           `(,op ,@(map-forms forms)))
         (operator-with-arg-and-forms  (op x &rest forms)
           `(,op ,x ,@(map-forms forms)))
-        ((cons (member let let*)) (let bindings &rest body)
-	  `(,let ,(map-let-bindings bindings) ,@(map-body body)))
-        ((cons (member flet labels macrolet)) (op bindings &rest body)
-	 `(,op ,(map-flet-bindings bindings) ,@(map-body body)))
+        ((variable-binding-form let let*) (op bindings &rest body)
+	  `(,op ,(map-let-bindings bindings) ,@(map-body body)))
+        (function-binding-form (op bindings &rest body)
+	  `(,op ,(map-flet-bindings bindings) ,@(map-body body)))
         ((function-form lambda-expr) (_ (__ lambda-list &rest body))
-          `#'(lambda ,lambda-list ,@(map-body body)))
+          `#'(lambda ,(map-lambda-list lambda-list) ,@(map-body body)))
         ((cons (eql load-time-value)) (_ form &optional read-only-p)
           `(load-time-value ,(map-form form) ,read-only-p))
         ((cons (eql locally)) (_ &rest body)
@@ -590,18 +700,19 @@
         ((and (cons symbol) special-form) x
           (error "Unknown special form: ~A" x))
         (lambda-form ((_ lambda-list &rest body) &rest forms)
-          `((lambda ,lambda-list ,@(map-body body t)) ,@(map-forms forms)))
+          `((lambda ,(map-lambda-list lambda-list) ,@(map-body body t))
+	    ,@(map-forms forms)))
         ((cons symbol list) (f &rest forms)
           `(,f ,@(map-forms forms)))
-         (cons x
+	(cons x
 	  (error "Malformed: ~A" x))
         (t x
           x))))
        (if toplevel
-	   (funcall fn mapped-form env)
-	   mapped-form))
+	   mapped-form
+	   (funcall fn mapped-form env)))
     '%map-subforms)))
-(defun map-subforms (fn form &key recursive)
+(defun map-subforms (fn form &key recursive env)
   (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
 
 (defun global-special-p (symbol)
@@ -609,52 +720,30 @@
 	   (let ((,symbol ',(list nil)))
 	     (and (boundp ',symbol) (eq ,symbol (foo)))))))
 
-(defun result-subforms (form)
-  '(cons (member catch if multiple-value-call multiple-value-prog1
-	         progn progv throw unwind-protect)))
-  (destructuring-typecase (macroexpand form env)
-    (symbol x
-      (list x))
-    ((cons (eql if)) (_ __ &rest stuff)
-      stuff)
-    ((cons (eql multiple-value-call)) (_ &rest forms)
-      forms)
-    ((cons (eql multiple-value-prog1)) (_ form &rest __)
-      (list form))
-    ((cons (eql progv)) (_ __ ___ &rest forms)
-      (last forms))
-    ((cons (eql throw)) (_ __ form)
-      (list form))
-    (operator-with-forms (op &rest forms)
-      (last forms))
-    (operator-with-arg-and-forms  (op x &rest forms)
-      (last forms))
-    ((cons (member let let*)) (let bindings &rest body)
-      `(,let ,(map-let-bindings bindings) ,@(map-body body)))
-    ((cons (member flet labels macrolet)) (op bindings &rest body)
-      `(,op ,(map-flet-bindings bindings) ,@(map-body body)))
-    ((function-form lambda-expr) (_ (__ lambda-list &rest body))
-      `#'(lambda ,lambda-list ,@(map-body body)))
-    ((cons (eql load-time-value)) (_ form &optional read-only-p)
-      (list form))
-    ((cons (eql locally)) (_ &rest body)
-      `(locally ,@(map-body body)))
-    ((cons (eql setq)) (_ &rest var-and-forms)
-      (loop for (v f) on var-and-forms by #'cddr collect f))
-    ((cons (eql symbol-macrolet)) (_ bindings &rest body)
-      `(symbol-macrolet ,bindings ,@(map-body body)))
-    ((cons (eql tagbody)) (_ &rest tags-and-forms)
-      nil)
-    ((and (cons symbol) special-form) x
-      (error "Unknown special form: ~A" x))
-    (lambda-form ((_ lambda-list &rest body) &rest forms)
-      (last forms))
-    ((cons symbol list) (f &rest forms)
-      forms)
-    (cons x
-      (error "Malformed: ~A" x))
-    (t x
-      x)))
+(defmacro with-define (&body body)
+  (let ((forms nil))
+    (loop for form in (reverse body) do
+	 (destructuring-typecase form
+	   ((list-of (eql define) symbol t) (_ var val)
+	     (setq forms `((let ((,var ,val)) ,@(or forms (list var))))))
+	   (t x
+	     (push x forms))))
+    (body-form forms)))
+
+(defmacro with-define (&body body)
+  (let ((ignore nil)
+	(result nil))
+    `(let* ,(mapcan (lambda (form)
+		      (setq result (gensym))
+		      (destructuring-typecase form
+			((list-of (eql define) symbol t) (_ var val)
+			  `((,result ,val) (,var ,result)))
+			(t x
+			  (push result ignore)
+			  `((,result ,x)))))
+		    body)
+       (declare (ignore ,@(delete result ignore)))
+       ,result)))
 
 (defun transform-to-cps (form k &optional env)
   (destructuring-typecase (macroexpand form env)
@@ -708,24 +797,6 @@
 	    (setq k `(lambda (,result) ,(transform-to-cps arg k))))
        (transform-to-cps (first args) k)))))
 
-
-;;; (foo ...)			#'foo
-;;;				#'(setf foo)
-;;; ((lambda (x) ...) ...)	#'(lambda (x) ...)
-;;;				#'(sb-int:named-lambda foo (x) ...)
-
-(define-function-macro lambda (args &body body)
-  (let ((fn (gensym)))
-    `(flet ((,fn ,args ,@body))
-       #',fn)))
-
-(define-function-macro setf (name)
-  `(load-time-value (fdefinition ',name)))
-
-(define-function-macro named-lambda (name args &body body)
-  `(labels ((,name ,args ,@body))
-     #',name))
-
 (defun capture-bindings (vars)
   (lambda (form env)
     (declare (ignore env))
@@ -748,53 +819,8 @@
 (defmacro with-captured-special-bindings (vars &body body)
   (map-subforms (capture-bindings vars) `(progn ,@body) :recursive t))
 
-(defmacro define-subform-macro (name
-				args
-				(form &key recursive
-				 ((&environment env) (gensym) envp))
-				&body body)
-  `(defmacro ,name ,args
-     (map-subforms (lambda (,form ,env)
-		     (declare (ignorable ,env))
-		     ,@body)
-		   form :recursive ,recursive))))
-
-#|
-(define-subform-macro with-captured-special-bindings
-    (vars &body body)
-    (
-|#
-
-(define-subform-macro step-subforms (form) (subform)
-  `(progn
-     (format t "~&Subform: ~A" ',subform)
-     (read-line)
-     (step-subforms ,subform)))
-
-#|
-(define-subform-macro %macroexpand-all (form &environment env) (subform)
-  (destructuring-typecase (macroexpand form env)
-    ((cons (member macrolet symbol-macrolet)) (op bindings . body)
-      ;; Macro bindings remain in the expansion, but dissapear in the result.
-      `(,op ,bindings
-        ,@(rest (mapping-subforms (subform `(locally ,@body))
-		  `(%macroexpand-all ,subform)))))
-    ((cons (member let let* flet labels)) (&whole x op bindings . _)
-      (declare (ignore _))
-      ;; Lexical bindings remain in the expansion, and also in the result.
-      (if (member op '(flet labels))
-	  (setq bindings (mapcar (lambda (b) `(,(first b) ,(second b) nil))
-				 bindings))
-	  (setq bindings (mapcar (lambda (b) (if (symbolp b) b (car b)))
-				 bindings)))
-      `(,op ,bindings ,(quote-tree (mapping-subforms (subform x)
-				     `(%macroexpand-all ,subform))
-				   '%macroexpand-all)))
-    (t x
-      ;; Everything else just goes into the result.
-      (quote-tree (mapping-subforms (subform x)
-		    `(%macroexpand-all ,subform))
-		  '%macroexpand-all))))
-|#
-
-;;; youtube.com/watch?feature=player_embedded&v=QFvNhsWMU0c
+
+;;; Local variables:
+;;; eval: (put 'destructuring-typecase 'common-lisp-indent-function
+;;;            '(4 &rest (&whole 2 4 . #1=(2 . #1#))))
+;;; End:
