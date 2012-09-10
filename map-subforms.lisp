@@ -189,13 +189,19 @@
 
 (deftype let-form () '(list-of (eql let) list . list))
 (deftype let*-form () '(list-of (eql let*) list . list))
+(deftype setq-form () '(list-of (eql setq) . list)
 (deftype lambda-expr () '(list-of (eql lambda) list . list))
 (deftype lambda-form () '(list-of lambda-expr . list))
 (deftype function-name () '(or symbol (list-of (eql setf) symbol)))
 (deftype function-form (&optional (arg '(or function-name lambda-expr)))
   `(list-of (eql function) ,arg))
-(deftype special-form () '(cons (and symbol (satisfies special-operator-p))))
-(deftype macro-form () '(cons (and symbol (satisfies macro-function))))
+(deftype special-form ()
+  '(cons (and symbol (satisfies special-operator-p))
+              list))
+(deftype macro-form ()
+  '(cons (and symbol (satisfies macro-function))
+         t)) ;Allow dotted lists.
+(deftype symbol-macrolet-form () '(list-of (eql symbol-macrolet) list . list))
 
 (deftype function-binding-form (&rest operators)
   `(list-of (member ,@(or operators '(flet labels macrolet))) list . list))
@@ -240,6 +246,11 @@
       (lambda-list-variables lambda-list))
     (t x
       (error "Not a variable binding form: ~S" x))))
+
+(defun binding-form-functions (form)
+  (destructuring-bind (op bindings . body) form
+    (declare (ignore op form))
+    (mapcar #'first bindings)))
 
 (defmacro with-gensyms (vars &body body)
   `(let ,(mapcar (lambda (var) `(,var (gensym))) vars)
@@ -468,7 +479,7 @@
         `',object)
       ((cons (eql return-from)) (_ tag &optional form)
         `(return-from ,tag ,(map-form form)))
-      ((cons (eql setq)) (_ &rest var-and-forms)
+      (setq-form (_ &rest var-and-forms)
         `(setq ,@(loop for (v f) on var-and-forms by #'cddr
 		       nconc (list v (map-form f)))))
       ((cons (eql symbol-macrolet)) (_ bindings &rest body)
@@ -548,7 +559,7 @@
           `(load-time-value ,(map-form form) ,read-only-p))
         ((cons (eql locally)) (_ &rest body)
           `(locally ,@(map-body body)))
-        ((cons (eql setq)) (_ &rest var-and-forms)
+        (setq-form (_ &rest var-and-forms)
 	  ;;TODO: macroexpand variables.
           `(setq ,@(loop for (v f) on var-and-forms by #'cddr
 		         nconc (list v (map-form f)))))
@@ -631,7 +642,7 @@
 		    '%map-subforms))
       ((cons (eql locally)) (_ &rest body)
 	(quote-tree (fn `(locally ,@(map-body body))) '%map-subforms))
-      ((cons (eql setq)) (_ &rest var-and-forms)
+      (setq-form (_ &rest var-and-forms)
 	;;TODO: macroexpand variables.
 	(quote-tree
 	 (fn `(setq ,@(loop for (v f) on var-and-forms by #'cddr
@@ -700,14 +711,14 @@
       (operator-with-arg-and-forms  (op x &rest forms)
 	`(,op ,x ,@(map-forms forms)))
       ((variable-binding-form let let*) (op bindings &rest body)
-	 `(,op ,(map-let-bindings bindings) ,@(map-body body)))
+	`(,op ,(map-let-bindings bindings) ,@(map-body body)))
       (function-binding-form (op bindings &rest body)
 	`(,op ,(map-flet-bindings bindings) ,@(map-body body)))
       ((cons (eql load-time-value)) (_ form &optional read-only-p)
 	`(load-time-value ,(map-form form) ,read-only-p))
       ((cons (eql locally)) (_ &rest body)
 	`(locally ,@(map-body body)))
-      ((cons (eql setq)) (_ &rest var-and-forms)
+      (setq-form (_ &rest var-and-forms)
 	;;TODO: macroexpand variables.
 	`(setq ,@(loop for (v f) on var-and-forms by #'cddr
 		       nconc (list v (map-form f)))))
@@ -732,7 +743,13 @@
 	x))))
 
 (defmacro %map-subforms (fn form &key toplevel recursive &environment env)
+  ;;(declare (optimize debug))
+  ;;(print (list :env env))
+  ;;(print (list :unexpanded form))
+  ;;(break)
   (setq form (macroexpand form env))
+  ;;(print (list :expanded form))
+  ;;(break)
   (let* ((mapped-form
 	  (simple-map-subforms
 	   (lambda (x)
@@ -747,7 +764,16 @@
 	       (funcall fn mapped-form env))
 	   '%map-subforms)))
     (destructuring-typecase form
-      (function-binding-form (op bindings &rest body)
+      (variable-binding-form form
+	(let ((symbols (binding-form-variables form)))
+	  (if t ;(typep form 'let-form)
+	      (setf (second (third (third result)))
+		    `(let ,symbols
+		       (declare (ignorable ,@symbols))
+		       ,(second (third (third result))))
+		    result result)
+	      `(let* ,symbols (declare (ignorable ,@symbols)) ,result))))
+      ((or function-binding-form symbol-macrolet-form) (op bindings . body)
 	(declare (ignore body))
 	`(,op ,bindings ,result))
       (t _
@@ -805,11 +831,11 @@
   (let ((vars nil))
     (do-subforms (subform form :result vars :recursive t &environment env)
       (let ((x (macroexpand subform env)))
-	(when (and (consp x) (eq (car x) 'setq))
+	(when (typep x 'setq-form)
 	  (loop for y in (cdr x) by #'cddr
-	     do (let ((z (macroexpand y env)))
-		  (when (symbolp z)
-		    (pushnew z vars)))))))))
+	        do (let ((z (macroexpand y env)))
+		     (when (symbolp z)
+		       (pushnew z vars)))))))))
 
 (defun form-bindings (form)
   (flet ((let-init-forms (bindings)
@@ -1008,12 +1034,14 @@
 
 (defmacro deftest (name () &body body)
   `(progn
-     (setf (gethash ',name *tests*) (lambda () ,@body))
+     ,(if body
+	  `(setf (gethash ',name *tests*) (lambda () ,@body))
+	  `(remhash ',name *tests*))
      ',name))
 
 (defun run-tests (&optional tests)
   (flet ((run (name fn)
-	   (format t "~&~40A ~:[FAIL~;ok~]~%"
+	   (format t "~&~60A ~:[FAIL~;ok~]~%"
 		   name (ignore-errors (funcall fn)))))
     (etypecase tests
       (null	(maphash #'run *tests*))
@@ -1050,6 +1078,72 @@
 		 :recursive t)
    '(macrolet ((a (b c)	`(d ,c ,b)))
       (d 21 11))))
+
+(deftest map-subforms-flet-and-macrolet ()
+  (tree-equal
+   (map-subforms (lambda (x e) (declare (ignore e)) (if (numberp x) (1+ x) x))
+		 '(flet ((f () 41))
+		    (macrolet ((f () 51))
+		      (f)))
+		 :recursive t)
+   '(flet ((f () 42))
+     (macrolet ((f () 52))
+       52))))
+
+(deftest map-subforms-macrolet-and-flet ()
+  (tree-equal
+   (map-subforms (lambda (x e) (declare (ignore e)) (if (numberp x) (1+ x) x))
+		 '(macrolet ((f () 51))
+		    (flet ((f () 41))
+		      (f)))
+		 :recursive t)
+   '(macrolet ((f () 52))
+     (flet ((f () 42))
+       (f)))))
+
+(deftest map-subforms-let-and-symbol-macrolet ()
+  (tree-equal
+   (map-subforms (lambda (x e) (declare (ignore e)) x)
+		 '(let ((x 42))
+		    (symbol-macrolet ((x 100))
+		      x))
+		 :recursive t)
+   '(let ((x 42))
+     (symbol-macrolet ((x 100))
+       100))))
+
+(deftest map-subforms-symbol-macrolet-and-let ()
+  (tree-equal
+   (map-subforms (lambda (x e) (declare (ignore e)) x)
+		 '(symbol-macrolet ((x 100))
+		    (let ((x 42))
+		      x))
+		 :recursive t)
+   '(symbol-macrolet ((x 100))
+      (let ((x 42))
+        x))))
+
+(deftest map-subforms-symbol-macrolet-and-let-2 ()
+  (tree-equal
+   (map-subforms (lambda (x e) (declare (ignore e)) x)
+		 '(symbol-macrolet ((x 100))
+		    (let ((x x))
+		      x))
+		 :recursive t)
+   '(symbol-macrolet ((x 100))
+      (let ((x 100))
+        x))))
+
+(deftest map-subforms-symbol-macrolet-and-let* ()
+  (tree-equal
+   (map-subforms (lambda (x e) (declare (ignore e)) x)
+		 '(symbol-macrolet ((x 100))
+		    (let* ((x x) (y x))
+		      x))
+		 :recursive t)
+   '(symbol-macrolet ((x 100))
+      (let* ((x 100) (y x))
+        x))))
 
 
 ;;; Local variables:
