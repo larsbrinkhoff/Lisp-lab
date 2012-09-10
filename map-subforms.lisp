@@ -172,8 +172,11 @@
 #+swank
 (eval-when (:execute :load-toplevel)
   (swank::send-to-emacs
-   '(:indentation-update (("larsb-foo" (4 "&rest" ("&whole" 2 4 "&rest" 2)))))))
+   '(:indentation-update (("destructuring-typecase"
+			   (4 "&rest" ("&whole" 2 4 "&rest" 2)))))))
 
+#|
+;;; This is Emacs Lisp:
 (defun indent-destructuring-typecase (path state indent-point
 				      sexp-column normal-indent)
   (case (car path)
@@ -182,6 +185,7 @@
 		      ((cddr path)		normal-indent)
 		      ((eq (cadr path) 1)	(+ sexp-column 4))
 		      (t		(+ sexp-column 2))))))
+|#
 
 (deftype let-form () '(list-of (eql let) list . list))
 (deftype let*-form () '(list-of (eql let*) list . list))
@@ -276,34 +280,6 @@
     (t
      body)))
 
-(defvar *closure-hash* (make-hash-table :test #'eq))
-(defmacro plambda (lambda-list &body body)
-  (with-gensyms (fn var val valp)
-    `(let ((,fn (lambda ,lambda-list ,@body)))
-       (setf (gethash ,fn *closure-hash*)
-	     (lambda (,var &optional (,val nil ,valp))
-	       (ecase ,var
-		 ,@(mapcar (lambda (x) `((,x) (setf ,x (if ,valp ,val ,x))))
-			   (free-variables `(lambda ,lambda-list ,@body))))))
-       ,fn)))
-(defun closure-variable (fn var)
-  (funcall (gethash fn *closure-hash*) var))
-(defun (setf closure-variable) (val fn var)
-  (funcall (gethash fn *closure-hash*) var val))
-
-(defmacro step-subforms (form &environment env)
-  `(progn
-     (format t "~&Subform: ~A" ',form)
-     (read-line)
-     ,(map-subforms (lambda (subform env) `(step-subforms ,subform))
-		    form)))
-(defmacro step-subforms (form &environment env)
-  `(progn
-     (format t "~&Subform: ~A" ',form)
-     (read-line)
-     ,(mapping-subforms (subform form env)
-        `(step-subforms ,subform))))
-
 (defmacro mapping-subforms ((subform form &optional (env (gensym) envp))
 			    &body body)
   `(map-subforms (lambda (,subform ,env)
@@ -332,20 +308,27 @@
 		 `(list ,@elts))))
     (destructuring-typecase x
       ((list-of (eql quote) t) (_ y)
+	(declare (ignore _))
 	(if (and (atom y) (constantp y)) y x))
       ((list-of (eql cons) t t) (_ car cdr)
+	(declare (ignore _))
 	(let ((car (simplify-quote car))
 	      (cdr (simplify-quote cdr)))
 	  (destructuring-typecase cdr
-	    (null _	(simplify-list (list car)))
+	    (null _	(declare (ignore _))
+			(simplify-list (list car)))
 	    ((list-of (eql quote) list) (_ list)
+			(declare (ignore _))
 			(if (constant-or-quoted-p car)
 			    `(quote (,(unquote car) ,@list))
 			    `(cons ,car ,cdr)))
 	   ((list-of (eql list) . list) (_ . list)
+			(declare (ignore _))
 			(simplify-list (cons car list)))
-	   (t _		`(cons ,car ,cdr)))))
+	   (t _		(declare (ignore _))
+			`(cons ,car ,cdr)))))
       (t _
+	(declare (ignore _))
 	x))))
 
 (defmacro %macroexpand-all (form &environment env)
@@ -367,6 +350,7 @@
 				     `(%macroexpand-all ,subform))
 				   '%macroexpand-all)))
     (lambda-form (&whole x (op lambda-list . body) . forms)
+      (declare (ignore op body forms))
       `(let ,(lambda-list-variables lambda-list)
 	 ,(quote-tree (mapping-subforms (subform x)
 			 `(%macroexpand-all ,subform))
@@ -402,7 +386,7 @@
 
 (deftype declaration-expr () '(cons (eql declare) list))
 (defvar *doc-allowed*)
-(defun doc-allowed (x) *doc-allowed*)
+(defun doc-allowed (x) (declare (ignore x)) *doc-allowed*)
 (deftype doc-string () '(and string (satisfies doc-allowed)))
 
 (defun parse-body (body &optional *doc-allowed*)
@@ -764,10 +748,13 @@
 	   '%map-subforms)))
     (destructuring-typecase form
       (function-binding-form (op bindings &rest body)
+	(declare (ignore body))
 	`(,op ,bindings ,result))
       (t _
+	(declare (ignore _))
 	result))))
 (defun map-subforms (fn form &key recursive env)
+  (declare (ignore env))
   (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
 
 
@@ -880,6 +867,34 @@
 (defun free-variables (form)
   (eval `(%free-variables ,form)))
 
+(defvar *closure-hash* (make-hash-table :test #'eq))
+(defmacro plambda (lambda-list &body body)
+  (with-gensyms (fn var val valp)
+    `(let ((,fn (lambda ,lambda-list ,@body)))
+       (setf (gethash ,fn *closure-hash*)
+	     (lambda (,var &optional (,val nil ,valp))
+	       (ecase ,var
+		 ,@(mapcar (lambda (x) `((,x) (setf ,x (if ,valp ,val ,x))))
+			   (free-variables `(lambda ,lambda-list ,@body))))))
+       ,fn)))
+(defun closure-variable (fn var)
+  (funcall (gethash fn *closure-hash*) var))
+(defun (setf closure-variable) (val fn var)
+  (funcall (gethash fn *closure-hash*) var val))
+
+(defmacro step-subforms (form)
+  `(progn
+     (format t "~&Subform: ~A" ',form)
+     (read-line)
+     ,(map-subforms (lambda (subform env) `(step-subforms ,subform))
+		    form)))
+(defmacro step-subforms (form)
+  `(progn
+     (format t "~&Subform: ~A" ',form)
+     (read-line)
+     ,(mapping-subforms (subform form env)
+        `(step-subforms ,subform))))
+
 (defun global-special-p (symbol)
   (eval `(flet ((foo () ,symbol))
 	   (let ((,symbol ',(list nil)))
@@ -890,6 +905,7 @@
     (loop for form in (reverse body) do
 	 (destructuring-typecase form
 	   ((list-of (eql define) symbol t) (_ var val)
+	     (declare (ignore _))
 	     (setq forms `((let ((,var ,val)) ,@(or forms (list var))))))
 	   (t x
 	     (push x forms))))
@@ -902,6 +918,7 @@
 		      (setq result (gensym))
 		      (destructuring-typecase form
 			((list-of (eql define) symbol t) (_ var val)
+			  (declare (ignore _))
 			  `((,result ,val) (,var ,result)))
 			(t x
 			  (push result ignore)
@@ -1006,7 +1023,7 @@
 
 (deftest map-subforms-recursively ()
   (tree-equal
-   (map-subforms (lambda (x e) `(1+ ,x))
+   (map-subforms (lambda (x e) (declare (ignore e)) `(1+ ,x))
 		 '(prog (a (b (c d)))
 		   e
 		   (f)
@@ -1021,13 +1038,13 @@
 
 (deftest map-subforms-not-recursively ()
   (tree-equal
-   (map-subforms (lambda (x e) `(1+ ,x))
+   (map-subforms (lambda (x e) (declare (ignore e)) `(1+ ,x))
 		 '(a b (c d) (e (f g))))
    '(a (1+ b) (1+ (c d)) (1+ (e (f g))))))
 
 (deftest map-subforms-macrolet ()
   (tree-equal
-   (map-subforms (lambda (x e) (if (numberp x) (1+ x) x))
+   (map-subforms (lambda (x e) (declare (ignore e)) (if (numberp x) (1+ x) x))
 		 '(macrolet ((a (b c) `(d ,c ,b)))
 		   (a 10 20))
 		 :recursive t)
