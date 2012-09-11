@@ -396,6 +396,11 @@
 			bindings))))))
 
 (deftype declaration-expr () '(cons (eql declare) list))
+
+(deftype standard-declaration-identifier ()
+  '(member declaration dymnamic-extent ftype function ignore inline
+    notinline optimize special type))
+
 (defvar *doc-allowed*)
 (defun doc-allowed (x) (declare (ignore x)) *doc-allowed*)
 (deftype doc-string () '(and string (satisfies doc-allowed)))
@@ -1150,3 +1155,5 @@
 ;;; eval: (put 'destructuring-typecase 'common-lisp-indent-function
 ;;;            '(4 &rest (&whole 2 4 . #1=(2 . #1#))))
 ;;; End:
+
+;;;; http://glennpendlay.wordpress.com/2012/02/17/got-tendonitis/
