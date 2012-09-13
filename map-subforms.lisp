@@ -799,6 +799,28 @@
       (cons	(dolist (name tests)
 		  (run-tests name))))))
 
+(defmacro define-map-subforms-test (name body input output)
+  `(deftest ,(intern (format nil "~A-~A" 'map-subforms name)) ()
+     (tree-equal
+      (map-subforms (lambda (x e) (declare (ignorable x e)) ,body)
+		    ',input)
+      ',output)))
+
+(define-map-subforms-test trivial-1
+  42
+  (f x)
+  (f 42))
+
+(define-map-subforms-test trivial-2
+  (if (numberp x) (1+ x) x)
+  (f 42)
+  (f 43))
+
+(define-map-subforms-test trivial-3
+  `(g ,x)
+  (f x)
+  (f (g x)))
+
 (deftest map-subforms-recursively ()
   (tree-equal
    (map-subforms (lambda (x e) (declare (ignore e)) `(1+ ,x))
@@ -814,11 +836,10 @@
 		  (1+ (f))
 		  (1+ (g (1+ (h (1+ i))))))))))))
 
-(deftest map-subforms-not-recursively ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) `(1+ ,x))
-		 '(a b (c d) (e (f g))))
-   '(a (1+ b) (1+ (c d)) (1+ (e (f g))))))
+(define-map-subforms-test not-recursively
+  `(1+ ,x)
+  (a b (c d) (e (f g)))
+  (a (1+ b) (1+ (c d)) (1+ (e (f g)))))
 
 (deftest map-subforms-macrolet ()
   (tree-equal
