@@ -806,115 +806,122 @@
 		    ',input)
       ',output)))
 
-(define-map-subforms-test trivial-1
-  42
-  (f x)
-  (f 42))
+(defmacro define-map-subforms-test* (name &rest stuff)
+  (flet ((get-key (key)
+	   (let* ((x (rest (member key stuff)))
+		  (y (member-if (lambda (x) (member x '(:body :input :output)))
+				x)))
+	     (ldiff x y))))
+    (let ((body (get-key :body))
+	  (input (get-key :input))
+	  (output (get-key :output)))
+      `(deftest ,(intern (format nil "~A-~A" 'map-subforms name)) ()
+	(tree-equal
+	 (map-subforms (lambda (x e) (declare (ignorable x e)) ,@body)
+	               ',(first input) ,@(rest input))
+	 ',(first output))))))
 
-(define-map-subforms-test trivial-2
-  (if (numberp x) (1+ x) x)
-  (f 42)
-  (f 43))
+(define-map-subforms-test* trivial-1
+  :body 42
+  :input (f x)
+  :output (f 42))
 
-(define-map-subforms-test trivial-3
-  `(g ,x)
-  (f x)
-  (f (g x)))
+(define-map-subforms-test* trivial-2
+  :body (if (numberp x) (1+ x) x)
+  :input (f 42)
+  :output (f 43))
 
-(deftest map-subforms-recursively ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) `(1+ ,x))
-		 '(prog (a (b (c d)))
-		   e
-		   (f)
-		   (g (h i)))
-		 :recursive t)
-   '(block nil
-     (1+ (let (a (b (1+ (c (1+ d)))))
-	   (1+ (tagbody
-		e
-		  (1+ (f))
-		  (1+ (g (1+ (h (1+ i))))))))))))
+(define-map-subforms-test* trivial-3
+  :body `(g ,x)
+  :input (f x)
+  :output (f (g x)))
 
-(define-map-subforms-test not-recursively
-  `(1+ ,x)
-  (a b (c d) (e (f g)))
-  (a (1+ b) (1+ (c d)) (1+ (e (f g)))))
+(define-map-subforms-test* recursively ()
+  :body `(1+ ,x)
+  :input (prog (a (b (c d)))
+	  e
+	  (f)
+	  (g (h i)))
+         :recursive t
+  :output (block nil
+	    (1+ (let (a (b (1+ (c (1+ d)))))
+		  (1+ (tagbody
+		       e
+			 (1+ (f))
+			 (1+ (g (1+ (h (1+ i)))))))))))
 
-(deftest map-subforms-macrolet ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) (if (numberp x) (1+ x) x))
-		 '(macrolet ((a (b c) `(d ,c ,b)))
-		   (a 10 20))
-		 :recursive t)
-   '(macrolet ((a (b c)	`(d ,c ,b)))
-      (d 21 11))))
+(define-map-subforms-test* not-recursively
+  :body `(1+ ,x)
+  :input (a b (c d) (e (f g)))
+  :output (a (1+ b) (1+ (c d)) (1+ (e (f g)))))
 
-(deftest map-subforms-flet-and-macrolet ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) (if (numberp x) (1+ x) x))
-		 '(flet ((f () 41))
-		    (macrolet ((f () 51))
-		      (f)))
-		 :recursive t)
-   '(flet ((f () 42))
-     (macrolet ((f () 52))
-       52))))
+(define-map-subforms-test* macrolet ()
+  :body (if (numberp x) (1+ x) x)
+  :input (macrolet ((a (b c) `(d ,c ,b)))
+	   (a 10 20))
+         :recursive t
+  :output (macrolet ((a (b c) `(d ,c ,b)))
+	    (d 21 11)))
 
-(deftest map-subforms-macrolet-and-flet ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) (if (numberp x) (1+ x) x))
-		 '(macrolet ((f () 51))
-		    (flet ((f () 41))
-		      (f)))
-		 :recursive t)
-   '(macrolet ((f () 52))
-     (flet ((f () 42))
-       (f)))))
+(define-map-subforms-test* flet-and-macrolet ()
+  :body (if (numberp x) (1+ x) x)
+  :input (flet ((f () 41))
+	   (macrolet ((f () 51))
+	     (f)))
+         :recursive t
+  :output (flet ((f () 42))
+	    (macrolet ((f () 52))
+	      52)))
 
-(deftest map-subforms-let-and-symbol-macrolet ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) x)
-		 '(let ((x 42))
-		    (symbol-macrolet ((x 100))
-		      x))
-		 :recursive t)
-   '(let ((x 42))
-     (symbol-macrolet ((x 100))
-       100))))
+(define-map-subforms-test* macrolet-and-flet ()
+  :body (if (numberp x) (1+ x) x)
+  :input (macrolet ((f () 51))
+	   (flet ((f () 41))
+	     (f)))
+	 :recursive t
+  :output (macrolet ((f () 52))
+	    (flet ((f () 42))
+	      (f))))
 
-(deftest map-subforms-symbol-macrolet-and-let ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) x)
-		 '(symbol-macrolet ((x 100))
-		    (let ((x 42))
-		      x))
-		 :recursive t)
-   '(symbol-macrolet ((x 100))
-      (let ((x 42))
-        x))))
+(define-map-subforms-test* let-and-symbol-macrolet ()
+  :body x
+  :input (let ((x 42))
+	   (symbol-macrolet ((x 100))
+	     x))
+	 :recursive t
+  :output (let ((x 42))
+	    (symbol-macrolet ((x 100))
+	      100)))
 
-(deftest map-subforms-symbol-macrolet-and-let-2 ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) x)
-		 '(symbol-macrolet ((x 100))
-		    (let ((x x))
-		      x))
-		 :recursive t)
-   '(symbol-macrolet ((x 100))
-      (let ((x 100))
-        x))))
+(define-map-subforms-test* symbol-macrolet-and-let ()
+  :body x
+  :input (symbol-macrolet ((x 100))
+	   (let ((x 42))
+	     x))
+	 :recursive t
+  :output (symbol-macrolet ((x 100))
+	    (let ((x 42))
+	      x)))
 
-(deftest map-subforms-symbol-macrolet-and-let* ()
-  (tree-equal
-   (map-subforms (lambda (x e) (declare (ignore e)) x)
-		 '(symbol-macrolet ((x 100))
-		    (let* ((x x) (y x))
-		      x))
-		 :recursive t)
-   '(symbol-macrolet ((x 100))
-      (let* ((x 100) (y x))
-        x))))
+(define-map-subforms-test* symbol-macrolet-and-let-2 ()
+  :body x
+  :input (symbol-macrolet ((x 100))
+	   (let ((x x))
+	     x))
+         :recursive t
+  :output (symbol-macrolet ((x 100))
+	    (let ((x 100))
+	      x)))
+
+(define-map-subforms-test* symbol-macrolet-and-let* ()
+  :body x
+  :input (symbol-macrolet ((x 100))
+	   (let* ((x x) (y x))
+	     x))
+         :recursive t
+  :output (symbol-macrolet ((x 100))
+	    (let* ((x 100) (y x))
+	      x)))
 
 
 ;;; Local variables:
