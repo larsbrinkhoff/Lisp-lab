@@ -799,14 +799,7 @@
       (cons	(dolist (name tests)
 		  (run-tests name))))))
 
-(defmacro define-map-subforms-test (name body input output)
-  `(deftest ,(intern (format nil "~A-~A" 'map-subforms name)) ()
-     (tree-equal
-      (map-subforms (lambda (x e) (declare (ignorable x e)) ,body)
-		    ',input)
-      ',output)))
-
-(defmacro define-map-subforms-test* (name &rest stuff)
+(defmacro define-map-subforms-test (name &rest stuff)
   (flet ((get-key (key)
 	   (let* ((x (rest (member key stuff)))
 		  (y (member-if (lambda (x) (member x '(:body :input :output)))
@@ -821,22 +814,27 @@
 	               ',(first input) ,@(rest input))
 	 ',(first output))))))
 
-(define-map-subforms-test* trivial-1
+(define-map-subforms-test trivial-1
   :body 42
   :input (f x)
   :output (f 42))
 
-(define-map-subforms-test* trivial-2
-  :body (if (numberp x) (1+ x) x)
+(define-map-subforms-test trivial-2
+  :body (1+ x)
   :input (f 42)
   :output (f 43))
 
-(define-map-subforms-test* trivial-3
+(define-map-subforms-test trivial-3
   :body `(g ,x)
   :input (f x)
   :output (f (g x)))
 
-(define-map-subforms-test* recursively ()
+(define-map-subforms-test trivial-4
+  :body (second x)
+  :input (f (g x))
+  :output (f x))
+
+(define-map-subforms-test recursively ()
   :body `(1+ ,x)
   :input (prog (a (b (c d)))
 	  e
@@ -850,12 +848,12 @@
 			 (1+ (f))
 			 (1+ (g (1+ (h (1+ i)))))))))))
 
-(define-map-subforms-test* not-recursively
+(define-map-subforms-test not-recursively
   :body `(1+ ,x)
   :input (a b (c d) (e (f g)))
   :output (a (1+ b) (1+ (c d)) (1+ (e (f g)))))
 
-(define-map-subforms-test* macrolet ()
+(define-map-subforms-test macrolet
   :body (if (numberp x) (1+ x) x)
   :input (macrolet ((a (b c) `(d ,c ,b)))
 	   (a 10 20))
@@ -863,7 +861,7 @@
   :output (macrolet ((a (b c) `(d ,c ,b)))
 	    (d 21 11)))
 
-(define-map-subforms-test* flet-and-macrolet ()
+(define-map-subforms-test flet-and-macrolet
   :body (if (numberp x) (1+ x) x)
   :input (flet ((f () 41))
 	   (macrolet ((f () 51))
@@ -873,7 +871,7 @@
 	    (macrolet ((f () 52))
 	      52)))
 
-(define-map-subforms-test* macrolet-and-flet ()
+(define-map-subforms-test macrolet-and-flet
   :body (if (numberp x) (1+ x) x)
   :input (macrolet ((f () 51))
 	   (flet ((f () 41))
@@ -883,7 +881,7 @@
 	    (flet ((f () 42))
 	      (f))))
 
-(define-map-subforms-test* let-and-symbol-macrolet ()
+(define-map-subforms-test let-and-symbol-macrolet
   :body x
   :input (let ((x 42))
 	   (symbol-macrolet ((x 100))
@@ -893,7 +891,7 @@
 	    (symbol-macrolet ((x 100))
 	      100)))
 
-(define-map-subforms-test* symbol-macrolet-and-let ()
+(define-map-subforms-test symbol-macrolet-and-let
   :body x
   :input (symbol-macrolet ((x 100))
 	   (let ((x 42))
@@ -903,7 +901,7 @@
 	    (let ((x 42))
 	      x)))
 
-(define-map-subforms-test* symbol-macrolet-and-let-2 ()
+(define-map-subforms-test symbol-macrolet-and-let-2
   :body x
   :input (symbol-macrolet ((x 100))
 	   (let ((x x))
@@ -913,7 +911,7 @@
 	    (let ((x 100))
 	      x)))
 
-(define-map-subforms-test* symbol-macrolet-and-let* ()
+(define-map-subforms-test symbol-macrolet-and-let*
   :body x
   :input (symbol-macrolet ((x 100))
 	   (let* ((x x) (y x))
@@ -922,6 +920,21 @@
   :output (symbol-macrolet ((x 100))
 	    (let* ((x 100) (y x))
 	      x)))
+
+#+sbcl
+(define-map-subforms-test truly-the
+  :body (1+ x)
+  :input (sb-ext:truly-the fixnum 42)
+  :output #.(if (string>= (lisp-implementation-version) "1.0.49")
+		'(the fixnum 43)
+		'(sb-ext:truly-the fixnum 43)))
+
+;;; #+clisp Function form: ((setf foo) bar)
+
+;;; #+ccl ccl:nfunction ccl:compiler-let ccl::ppc-lap-function
+;;; ccl::with-variable-c-frame ccl::with-c-frame ccl::fbind
+
+;;; #+lispworks: nothing
 
 
 ;;; Local variables:
