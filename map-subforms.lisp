@@ -384,21 +384,21 @@
 	x))))
 
 (defun map-let-subforms (fn recursive bindings body)
-  ``(let (,,@(mapcar (lambda (binding)
-		       (etypecase binding
-			 (symbol
-			  `',binding)
-			 ((cons symbol null)
-			  `',binding)
-			 ((cons symbol cons)
-			  ``(,',(first binding)
-			     ,(%map-subforms
-			       ,fn ,(second binding)
-			       :recursive ,recursive)))))
-		     bindings))
-     ,,@(mapcar (lambda (x) `(%map-subforms ,fn ,x :recursive ,recursive
-			      :variables ,(let-variables bindings)))
-		  body)))
+  `(let ,(mapcar (lambda (binding)
+		   (etypecase binding
+		     (symbol
+		      binding)
+		     ((cons symbol null)
+		      binding)
+		     ((cons symbol cons)
+		      `(,(first binding)
+			(%map-subforms ,fn ,(second binding)
+				       :recursive ,recursive)))))
+		 bindings)
+     ,@(mapcar (lambda (x)
+		 `(%map-subforms ,fn ,x :recursive ,recursive
+				 :variables ,(let-variables bindings)))
+	       body)))
 
 (defun map-let*-subforms (fn recursive bindings body)
   (let ((variables nil))
@@ -412,17 +412,10 @@
 			     `',binding)
 			    ((cons symbol cons)
 			     (prog1 ``(,',(first binding)
-				       ;;#+(or)
 				       ,(%map-subforms
 					 ,fn ,(second binding)
 					 :recursive ,recursive
-					 :variables ,variables)
-				       #+(or)
-				       ,(let ,variables
-					  (declare (ignorable ,@variables))
-					  (%map-subforms
-					   ,fn ,(second binding)
-					   :recursive ,recursive)))
+					 :variables ,variables))
 			       (push (first binding) variables)))))
 			bindings))
        ,,@(mapcar (lambda (x) `(%map-subforms ,fn ,x
@@ -462,6 +455,7 @@
 
 (defmacro %map-subforms (fn form &rest keys &key toplevel recursive variables
 			 functions macros symbol-macros &environment env)
+  (declare (ignore macros symbol-macros))
   (when variables
     (return-from %map-subforms
       `(let ,variables
@@ -486,16 +480,21 @@
 	       mapped-form
 	       (funcall fn mapped-form env))
 	   '%map-subforms)))
+  (flet ((output (mapped-form)
+	   (quote-tree (if toplevel
+			   mapped-form
+			   (funcall fn mapped-form env))
+		       '%map-subforms)))
     (destructuring-typecase form
       (flet-form (op bindings . body)
 	(declare (ignore op))
 	(map-flet-subforms fn recursive bindings body))
       ((or function-binding-form symbol-macrolet-form) (op bindings . body)
 	(declare (ignore body))
-	`(,op ,bindings ,result))
+        `(,op ,bindings ,result))
       (let-form (op bindings . body)
 	(declare (ignore op))
-	(map-let-subforms fn recursive bindings body))
+	(output (map-let-subforms fn recursive bindings body)))
       (let*-form (op bindings . body)
 	(declare (ignore op))
 	(map-let*-subforms fn recursive bindings body))
@@ -512,7 +511,7 @@
 	      `(let* ,symbols (declare (ignorable ,@symbols)) ,result))))
       (t _
 	(declare (ignore _))
-	result))))
+	result)))))
 (defun map-subforms (fn form &key recursive env)
   (declare (ignore env))
   (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
@@ -883,15 +882,26 @@
 	  `(remhash ',name *tests*))
      ',name))
 
-(defun run-tests (&optional tests)
-  (flet ((run (name fn)
-	   (format t "~&~60A ~:[FAIL~;ok~]~%"
-		   name (ignore-errors (funcall fn)))))
-    (etypecase tests
-      (null	(maphash #'run *tests*))
-      (symbol	(run tests (gethash tests *tests*)))
-      (cons	(dolist (name tests)
-		  (run-tests name))))))
+(defun run-tests (&key tests verbose)
+  (let ((failures 0)
+	(successes 0))
+    (flet ((run (name fn)
+	     (cond ((ignore-errors (funcall fn))
+		    (when verbose
+		      (format t "~&~60A ok~%" name))
+		    (incf successes))
+		   (t
+		    (format t "~&~60A FAIL~%" name)
+		    (incf failures)))
+	     #+(or)
+	     (format t "~&~60A ~:[FAIL~;ok~]~%"
+		     name (ignore-errors (funcall fn)))))
+      (etypecase tests
+	(null	(maphash #'run *tests*))
+	(symbol	(run tests (gethash tests *tests*)))
+	(cons	(dolist (name tests)
+		  (run-tests name)))))
+    (format t "~&Successes: ~D, failures: ~D~%" successes failures)))
 
 (defmacro define-map-subforms-test (name &rest stuff)
   (flet ((get-key (key)
@@ -1068,7 +1078,11 @@
 		'(the fixnum 43)
 		'(sb-ext:truly-the fixnum 43)))
 
-;;; #+clisp Function form: ((setf foo) bar)
+#+clisp
+(define-map-subforms-test setf-call
+  :body `(cons ,x nil)
+  :input ((setf cdr) 1 x)
+  :output ((setf cdr) (cons 1 nil) (cons x nil)))
 
 ;;; #+ccl ccl:nfunction ccl:compiler-let ccl::ppc-lap-function
 ;;; ccl::with-variable-c-frame ccl::with-c-frame ccl::fbind
