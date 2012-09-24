@@ -6,8 +6,7 @@
 ;;; define-setf-expander, defsetf, get-setf-expansion,
 ;;; constantp, make-load-form, make-load-form-saving-slots,
 ;;; deftype, typep, subtypep, upgraded-array-element-type,
-;;; upgraded-complex-part-type
-;;; NEW: find-class
+;;; upgraded-complex-part-type, find-class
 
 (defun compilation-error (form)
   (handler-bind ((warning #'muffle-warning)
@@ -421,7 +420,7 @@
 		     bindings))
      ,,@(mapcar (lambda (x) `(%map-subforms ,fn ,x :recursive ,recursive
 			      :variables ,(let-variables bindings)))
-		  body))))
+		  body)))
 
 (defun map-let*-subforms (fn recursive bindings body)
   (let ((variables nil))
