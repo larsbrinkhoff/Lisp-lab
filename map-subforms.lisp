@@ -467,20 +467,14 @@
 	 (%map-subforms ,fn ,form :functions nil ,@keys))))
   ;;(print (list env form (macroexpand form env)))
   (setq form (macroexpand form env))
-  (let* ((mapped-form
-	  (simple-map-subforms
-	   (lambda (x)
-	     (if (or toplevel recursive)
-		 `(%map-subforms ,fn ,x :recursive ,recursive)
-		 x))
-	   form))
-	 (result
-	  (quote-tree
-	   (if toplevel
-	       mapped-form
-	       (funcall fn mapped-form env))
-	   '%map-subforms)))
-  (flet ((output (mapped-form)
+  (flet ((simple ()
+	   (simple-map-subforms
+	    (lambda (x)
+	      (if (or toplevel recursive)
+		  `(%map-subforms ,fn ,x :recursive ,recursive)
+		  x))
+	    form))
+	 (output (mapped-form)
 	   (quote-tree (if toplevel
 			   mapped-form
 			   (funcall fn mapped-form env))
@@ -491,7 +485,7 @@
 	(output (map-flet-subforms fn recursive bindings body)))
       ((or function-binding-form symbol-macrolet-form) (op bindings . body)
 	(declare (ignore body))
-        `(,op ,bindings ,result))
+        `(,op ,bindings ,(output (simple))))
       (let-form (op bindings . body)
 	(declare (ignore op))
 	(output (map-let-subforms fn recursive bindings body)))
@@ -499,9 +493,10 @@
 	(declare (ignore op))
 	(output (map-let*-subforms fn recursive bindings body)))
       ((function-form lambda-expr) _
-	result)
+	(output (simple)))
       (variable-binding-form form
-	(let ((symbols (binding-form-variables form)))
+	(let ((symbols (binding-form-variables form))
+	      (result (output (simple))))
 	  (if t ;(typep form 'let-form)
 	      (setf (second (third (third result)))
 		    `(let ,symbols
@@ -511,7 +506,7 @@
 	      `(let* ,symbols (declare (ignorable ,@symbols)) ,result))))
       (t _
 	(declare (ignore _))
-	result)))))
+	(output (simple))))))
 (defun map-subforms (fn form &key recursive env)
   (declare (ignore env))
   (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
