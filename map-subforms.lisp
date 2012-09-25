@@ -453,6 +453,27 @@
 			      :functions ,(mapcar #'first bindings)))
 		body))))
 
+(defun map-lambda-subforms (fn recursive lambda-list body)
+  (flet ((map-lambda-list (lambda-list)
+	   (mapcar (lambda (arg)
+		     (destructuring-typecase arg
+		       ((list-of t t . list) (x y . z)
+			 `(,x
+			   (%map-subforms ,fn ,y :recursive ,recursive
+			    :variables ,(lambda-list-variables
+					 (ldiff lambda-list
+						(member arg lambda-list))))
+			    ,@z))
+		       (t x
+			 x)))
+		   lambda-list)))
+    `(lambda ,(map-lambda-list lambda-list)
+       ,@(mapcar (lambda (x)
+		   `(%map-subforms ,fn ,x :recursive ,recursive
+				   :variables
+				   ,(lambda-list-variables lambda-list)))
+		 body))))
+
 (defmacro %map-subforms (fn form &rest keys &key toplevel recursive variables
 			 functions macros symbol-macros &environment env)
   (declare (ignore macros symbol-macros))
@@ -492,8 +513,15 @@
       (let*-form (op bindings . body)
 	(declare (ignore op))
 	(output (map-let*-subforms fn recursive bindings body)))
-      ((function-form lambda-expr) _
-	(output (simple)))
+      ((function-form lambda-expr) #'(lambda lambda-list . body)
+	(declare (ignore function lambda))
+        (output `#',(map-lambda-subforms fn recursive lambda-list body)))
+      (lambda-form ((lambda lambda-list . body) . forms)
+	(declare (ignore lambda))
+        (output `(,(map-lambda-subforms fn recursive lambda-list body)
+		  ,@(mapcar (lambda (x)
+			      `(%map-subforms ,fn ,x :recursive ,recursive))
+			    forms))))
       (variable-binding-form form
 	(let ((symbols (binding-form-variables form))
 	      (result (output (simple))))
