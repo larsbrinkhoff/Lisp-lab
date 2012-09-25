@@ -347,6 +347,8 @@
 	x)
       ((function-form lambda-expr) (_ (__ lambda-list &rest body))
 	`#'(lambda ,(map-lambda-list lambda-list) ,@(map-body body)))
+      ((function-form (not (or function-name lambda-expr))) x
+	(map-unknown-subforms fn (copy-tree x)))
       (operator-with-forms (op &rest forms)
 	`(,op ,@(map-forms forms)))
       (operator-with-arg-and-forms  (op x &rest forms)
@@ -357,15 +359,15 @@
 	`(,op ,(map-let-bindings bindings) ,@(map-body body)))
       (function-binding-form (op bindings &rest body)
 	`(,op ,(map-flet-bindings bindings) ,@(map-body body)))
-      ((cons (eql load-time-value)) (_ form &optional read-only-p)
+      (load-time-value-form (_ form &optional read-only-p)
 	`(load-time-value ,(map-form form) ,read-only-p))
-      ((cons (eql locally)) (_ &rest body)
+      (locally-form (_ &rest body)
 	`(locally ,@(map-body body)))
       (setq-form (_ &rest var-and-forms)
 	;;TODO: macroexpand variables.
 	`(setq ,@(loop for (v f) on var-and-forms by #'cddr
 		       nconc (list v (map-form f)))))
-      ((cons (eql tagbody)) (_ &rest tags-and-forms)
+      (tagbody-form (_ &rest tags-and-forms)
 	`(tagbody ,@(mapcar (lambda (x)
 			      (typecase x
 				((or symbol integer)	x)
@@ -402,56 +404,54 @@
 
 (defun map-let*-subforms (fn recursive bindings body)
   (let ((variables nil))
-    ``(let* (,,@(mapcar (lambda (binding)
-			  (etypecase binding
-			    (symbol
-			     (push binding variables)
-			     `',binding)
-			    ((cons symbol null)
-			     (push (first binding) variables)
-			     `',binding)
-			    ((cons symbol cons)
-			     (prog1 ``(,',(first binding)
-				       ,(%map-subforms
-					 ,fn ,(second binding)
-					 :recursive ,recursive
-					 :variables ,variables))
-			       (push (first binding) variables)))))
-			bindings))
-       ,,@(mapcar (lambda (x) `(%map-subforms ,fn ,x
-				:recursive ,recursive :variables ,variables))
-		  body))))
+    `(let* ,(mapcar (lambda (binding)
+		      (etypecase binding
+			(symbol
+			 (push binding variables)
+			 binding)
+			((cons symbol null)
+			 (push (first binding) variables)
+			 binding)
+			((cons symbol cons)
+			 (prog1 `(,(first binding)
+				  (%map-subforms
+				   ,fn ,(second binding)
+				   :recursive ,recursive
+				   :variables ,variables))
+			   (push (first binding) variables)))))
+		    bindings)
+       ,@(mapcar (lambda (x) `(%map-subforms ,fn ,x
+			       :recursive ,recursive :variables ,variables))
+		 body))))
 
 (defun map-flet-subforms (fn recursive bindings body)
   (flet ((map-lambda-list (lambda-list)
 	   (mapcar (lambda (arg)
 		     (destructuring-typecase arg
 		       ((list-of t t . list) (x y . z)
-			 ``(,',x
-			    ,(%map-subforms ,fn ,y :recursive ,recursive
-					    :variables
-					    ,(lambda-list-variables
-					      (ldiff
-					       lambda-list
-					       (member arg lambda-list))))
-			    ,@',z))
+			 `(,x
+			   (%map-subforms ,fn ,y :recursive ,recursive
+			    :variables ,(lambda-list-variables
+					 (ldiff lambda-list
+						(member arg lambda-list))))
+			    ,@z))
 		       (t x
-			 `',x)))
+			 x)))
 		   lambda-list)))
-    ``(flet (,,@(mapcar
-		 (lambda (binding)
-		   (destructuring-bind (name lambda-list . body) binding
-		     ``(,',name (,,@(map-lambda-list lambda-list))
-			,,@(mapcar
-			    (lambda (x)
-			      `(%map-subforms ,fn ,x :recursive ,recursive
-				:variables
-				,(lambda-list-variables lambda-list)))
-			    body))))
-		 bindings))
-       ,,@(mapcar (lambda (x) `(%map-subforms ,fn ,x :recursive ,recursive
-				:functions ,(mapcar #'first bindings)))
-		  body))))
+    `(flet ,(mapcar
+	     (lambda (binding)
+	       (destructuring-bind (name lambda-list . body) binding
+		 `(,name ,(map-lambda-list lambda-list)
+		   ,@(mapcar
+		      (lambda (x)
+			`(%map-subforms ,fn ,x :recursive ,recursive
+			  :variables
+			  ,(lambda-list-variables lambda-list)))
+		      body))))
+	     bindings)
+      ,@(mapcar (lambda (x) `(%map-subforms ,fn ,x :recursive ,recursive
+			      :functions ,(mapcar #'first bindings)))
+		body))))
 
 (defmacro %map-subforms (fn form &rest keys &key toplevel recursive variables
 			 functions macros symbol-macros &environment env)
@@ -488,7 +488,7 @@
     (destructuring-typecase form
       (flet-form (op bindings . body)
 	(declare (ignore op))
-	(map-flet-subforms fn recursive bindings body))
+	(output (map-flet-subforms fn recursive bindings body)))
       ((or function-binding-form symbol-macrolet-form) (op bindings . body)
 	(declare (ignore body))
         `(,op ,bindings ,result))
@@ -497,7 +497,7 @@
 	(output (map-let-subforms fn recursive bindings body)))
       (let*-form (op bindings . body)
 	(declare (ignore op))
-	(map-let*-subforms fn recursive bindings body))
+	(output (map-let*-subforms fn recursive bindings body)))
       ((function-form lambda-expr) _
 	result)
       (variable-binding-form form
@@ -1071,15 +1071,29 @@
 	    2)))
 
 #+sbcl
-(define-map-subforms-test truly-the
+(define-map-subforms-test sbcl-truly-the
   :body (1+ x)
   :input (sb-ext:truly-the fixnum 42)
   :output #.(if (string>= (lisp-implementation-version) "1.0.49")
 		'(the fixnum 43)
 		'(sb-ext:truly-the fixnum 43)))
 
+#+sbcl
+(define-map-subforms-test sbcl-named-lambda
+  :body (1+ x)
+  :input #'(sb-int:named-lambda foo () 42)
+  :output #'(sb-int:named-lambda foo () 43))
+#+(or)
+(define-map-subforms-test sbcl-named-lambda
+  :body x
+  :input (symbol-macrolet ((x 42))
+	   (sb-int:named-lambda foo (x) x))
+         :recursive t
+  :output (symbol-macrolet ((x 42))
+	    (sb-int:named-lambda foo (x) x)))
+
 #+clisp
-(define-map-subforms-test setf-call
+(define-map-subforms-test clisp-setf-call
   :body `(cons ,x nil)
   :input ((setf cdr) 1 x)
   :output ((setf cdr) (cons 1 nil) (cons x nil)))
