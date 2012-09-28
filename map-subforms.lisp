@@ -1108,12 +1108,16 @@
   :output #'(sb-int:named-lambda foo () 43))
 #+(or)
 (define-map-subforms-test sbcl-named-lambda
-  :body x
+  :body (if (numberp x) (1+ x) x)
   :input (symbol-macrolet ((x 42))
-	   (sb-int:named-lambda foo (x) x))
+	   (sb-int:named-lambda foo (x) (+ x 1)))
          :recursive t
   :output (symbol-macrolet ((x 42))
-	    (sb-int:named-lambda foo (x) x)))
+	    (sb-int:named-lambda foo (x) (+ x 2))))
+
+;;; #+sbcl sb-cltl2:compiler-let sb-c::global-function sb-c::%funcall
+;;; sb-c::%within-cleanup sb-c::%escape-fun sb-c::%%allocate-closures
+;;; sb-c::%cleanup-fun sb-sys:%primitive
 
 #+clisp
 (define-map-subforms-test clisp-setf-call
@@ -1123,6 +1127,8 @@
 
 ;;; #+ccl ccl:nfunction ccl:compiler-let ccl::ppc-lap-function
 ;;; ccl::with-variable-c-frame ccl::with-c-frame ccl::fbind
+
+;;; #+ecl ext:compiler-let
 
 ;;; #+lispworks: nothing
 
