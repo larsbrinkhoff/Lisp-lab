@@ -451,20 +451,19 @@
     (return-from %map-subforms
       `(flet ,(mapcar (lambda (x) `(,x (&rest x))) functions)
 	 (%map-subforms ,fn ,form :functions nil ,@keys))))
-  ;;(print (list env form (macroexpand form env)))
-  (setq form (macroexpand form env))
   (flet ((simple ()
 	   (simple-map-subforms
-	    (lambda (x)
-	      (if (or toplevel recursive)
-		  `(%map-subforms ,fn ,x :recursive ,recursive)
-		  x))
+	    (lambda (x) `(%map-subforms ,fn ,x :recursive ,recursive))
 	    form))
 	 (output (mapped-form)
 	   (quote-tree (if toplevel
 			   mapped-form
 			   (funcall fn mapped-form env))
 		       '%map-subforms)))
+    (unless (or toplevel recursive)
+      (return-from %map-subforms (output form)))
+    ;;(print (list env form (macroexpand form env)))
+    (setq form (macroexpand form env))
     (destructuring-typecase form
       (flet-form (op bindings . body)
 	(declare (ignore op))
@@ -476,7 +475,8 @@
 	(output (map-let/*-subforms op fn recursive bindings body)))
       ((function-form lambda-expr) #'(lambda lambda-list . body)
 	(declare (ignore function))
-        (output `#',(map-lambda-subforms fn recursive lambda lambda-list body)))
+        (output `#',(map-lambda-subforms
+		     fn recursive lambda lambda-list body)))
       (lambda-form ((lambda lambda-list . body) . forms)
         (output `(,(map-lambda-subforms fn recursive lambda lambda-list body t)
 		  ,@(mapcar (lambda (x)
