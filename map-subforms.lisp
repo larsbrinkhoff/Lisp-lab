@@ -1119,4 +1119,4 @@
 ;;;            '(4 &rest (&whole 2 4 . #1=(2 . #1#))))
 ;;; End:
 
-;;;; http://glennpendlay.wordpress.com/2012/02/17/got-tendonitis/
+;;;;  http://glennpendlay.wordpress.com/2012/02/17/got-tendonitis/
