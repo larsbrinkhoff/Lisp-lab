@@ -15,7 +15,7 @@
 	  (*error-output* (make-broadcast-stream)))
       (nth-value 2 (compile nil `(lambda () ,form))))))
 
-(defun map-unknowns-subforms (fn form)
+(defun map-unknown-subforms (fn form)
   (when (atom form)
     (return-from map-unknown-subforms form))
   (labels ((walk (subforms)
@@ -332,7 +332,7 @@
 	     (mapcar
 	      (lambda (b)
 		(destructuring-bind (name lambda-list . body) b
-		  `(,name ,(map-lambda-list lambda-list) ,@(map-body body))))
+		  `(,name ,(map-lambda-list lambda-list) ,@(map-body body t))))
 	      bindings))
 	   (map-lambda-list (lambda-list)
 	     (mapcar (lambda (arg)
@@ -346,7 +346,7 @@
       (symbol x
 	x)
       ((function-form lambda-expr) (_ (__ lambda-list &rest body))
-	`#'(lambda ,(map-lambda-list lambda-list) ,@(map-body body)))
+	`#'(lambda ,(map-lambda-list lambda-list) ,@(map-body body t)))
       ((function-form (not (or function-name lambda-expr))) x
 	(map-unknown-subforms fn (copy-tree x)))
       (operator-with-forms (op &rest forms)
@@ -423,7 +423,7 @@
 	   bindings)
      ,@(map-body fn recursive body :functions (mapcar #'first bindings))))
 
-(defun map-lambda-subforms (fn recursive op lambda-list body &optional doc)
+(defun map-lambda-subforms (fn recursive op lambda-list body)
   `(,op ,(mapcar (lambda (arg)
 		   (destructuring-typecase arg
 		     ((list-of t t . list) (x y . z)
@@ -436,7 +436,7 @@
 		     (t x
 		       x)))
 		 lambda-list)
-	,@(map-body fn recursive body :doc doc
+	,@(map-body fn recursive body :doc t
 		    :variables (lambda-list-variables lambda-list))))
 
 (defmacro %map-subforms (fn form &rest keys &key toplevel recursive variables
@@ -478,7 +478,7 @@
         (output `#',(map-lambda-subforms
 		     fn recursive lambda lambda-list body)))
       (lambda-form ((lambda lambda-list . body) . forms)
-        (output `(,(map-lambda-subforms fn recursive lambda lambda-list body t)
+        (output `(,(map-lambda-subforms fn recursive lambda lambda-list body)
 		  ,@(mapcar (lambda (x)
 			      `(%map-subforms ,fn ,x :recursive ,recursive))
 			    forms))))
