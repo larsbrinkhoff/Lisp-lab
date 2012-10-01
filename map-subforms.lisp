@@ -472,7 +472,7 @@
 	(declare (ignore body))
         `(,op ,bindings ,(output (simple))))
       (let/*-form (op bindings . body)
-	(output (map-let/*-subforms op fn recursive bindings body)))
+	(output (map-let-subforms op fn recursive bindings body)))
       ((function-form lambda-expr) #'(lambda lambda-list . body)
 	(declare (ignore function))
         (output `#',(map-lambda-subforms
@@ -485,6 +485,7 @@
       (t _
 	(declare (ignore _))
 	(output (simple))))))
+
 (defun map-subforms (fn form &key recursive env)
   (declare (ignore env))
   (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
@@ -525,6 +526,8 @@
     (remove-macrolet y)))
     ;;(map-subforms #'macroexpand-all (macroexpand form env)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defmacro mapping-subforms ((subform form &optional (env (gensym) envp))
 			    &body body)
   `(map-subforms (lambda (,subform ,env)
@@ -563,6 +566,8 @@
 		  '%macroexpand-all))))
 (defun macroexpand-all (form)
   (eval `(%macroexpand-all ,form)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmacro declare-ignore (vars &body body &environment env)
   (body-form
@@ -609,6 +614,8 @@
 		   ,form
 		   :recursive ,recursive)
      ,result))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun form-variables (form)
   (let ((vars nil))
@@ -686,6 +693,7 @@
   (eval `(%free-variables ,form)))
 
 (defvar *closure-hash* (make-hash-table :test #'eq))
+
 (defmacro plambda (lambda-list &body body)
   (with-gensyms (fn var val valp)
     `(let ((,fn (lambda ,lambda-list ,@body)))
@@ -695,10 +703,14 @@
 		 ,@(mapcar (lambda (x) `((,x) (setf ,x (if ,valp ,val ,x))))
 			   (free-variables `(lambda ,lambda-list ,@body))))))
        ,fn)))
+
 (defun closure-variable (fn var)
   (funcall (gethash fn *closure-hash*) var))
+
 (defun (setf closure-variable) (val fn var)
   (funcall (gethash fn *closure-hash*) var val))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmacro step-subforms (form)
   `(progn
@@ -716,10 +728,7 @@
 	(declare (ignore env))
         `(step-subforms ,subform))))
 
-(defun global-special-p (symbol)
-  (eval `(flet ((foo () ,symbol))
-	   (let ((,symbol ',(list nil)))
-	     (and (boundp ',symbol) (eq ,symbol (foo)))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmacro with-define (&body body)
   (let ((forms nil))
@@ -747,6 +756,13 @@
 		    body)
        (declare (ignore ,@(delete result ignore)))
        ,result)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun global-special-p (symbol)
+  (eval `(flet ((foo () ,symbol))
+	   (let ((,symbol ',(list nil)))
+	     (and (boundp ',symbol) (eq ,symbol (foo)))))))
 
 (defun transform-to-cps (form k &optional env)
   (destructuring-typecase (macroexpand form env)
@@ -821,6 +837,8 @@
 	 (,fn ,@(mapcar (lambda (val) (if (symbolp val) nil (second val)))
 			bindings))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun capture-bindings (vars)
   (lambda (form env)
     (declare (ignore env))
@@ -873,7 +891,7 @@
 	(null	(maphash #'run *tests*))
 	(symbol	(run tests (gethash tests *tests*)))
 	(cons	(dolist (name tests)
-		  (run-tests name)))))
+		  (run-tests :tests name)))))
     (format t "~&Successes: ~D, failures: ~D~%" successes failures)))
 
 (defmacro define-map-subforms-test (name &rest stuff)
