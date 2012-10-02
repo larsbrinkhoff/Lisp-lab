@@ -385,76 +385,23 @@
       (t x
 	x))))
 
-<<<<<<< HEAD
-(defun map-body (fn recursive body &key doc variables functions)
-  (multiple-value-bind (forms decls doc) (parse-body body doc)
-    `(,@(when doc (list doc))
-      ,@decls
-      ,@(mapcar (lambda (x)
-		  `(%map-subforms ,fn ,x :recursive ,recursive
-		    :variables ,variables :functions ,functions))
-		forms))))
-
-(defun map-let-subforms (op fn recursive bindings body)
-  (let ((variables nil))
-    `(,op ,(mapcar (lambda (binding)
-		     (etypecase binding
-		       (symbol
-			(push binding variables)
-			binding)
-		       ((cons symbol null)
-			(push (first binding) variables)
-			binding)
-		       ((cons symbol cons)
-			(prog1 `(,(first binding)
-				 (%map-subforms
-				  ,fn ,(second binding)
-				  :recursive ,recursive
-				  ,@(when (eq op 'let*)
-				     `(:variables ,variables))))
-			  (push (first binding) variables)))))
-		   bindings)
-	,@(map-body fn recursive body :variables variables))))
-
-(defun map-flet-subforms (fn recursive bindings body)
-  `(flet ,(mapcar
-	   (lambda (binding)
-	     (destructuring-bind (name lambda-list . body) binding
-	       (map-lambda-subforms fn recursive name lambda-list body)))
-	   bindings)
-     ,@(map-body fn recursive body :functions (mapcar #'first bindings))))
-
-(defun map-lambda-subforms (fn recursive op lambda-list body)
-  `(,op ,(mapcar (lambda (arg)
-		   (destructuring-typecase arg
-		     ((list-of t t . list) (x y . z)
-		       `(,x
-			 (%map-subforms ,fn ,y :recursive ,recursive
-			  :variables ,(lambda-list-variables
-				       (ldiff lambda-list
-					      (member arg lambda-list))))
-			 ,@z))
-		     (t x
-		       x)))
-		 lambda-list)
-	,@(map-body fn recursive body :doc t
-		    :variables (lambda-list-variables lambda-list))))
-=======
-(defvar *quote-mapping* t)
->>>>>>> 8a44fe7994d33061f3d89f9bd902d3e117722066
+(define-symbol-macro quote-mapping t)
 
 (defmacro %map-subforms (fn form &rest keys &key toplevel recursive variables
 			 functions macros symbol-macros &environment env)
   (declare (ignore macros symbol-macros))
-  (when variables
-    (return-from %map-subforms
-      `(let ,variables
-	 (declare (ignorable ,@variables))
-	 (%map-subforms ,fn ,form :variables nil ,@keys))))
-  (when functions
-    (return-from %map-subforms
-      `(flet ,(mapcar (lambda (x) `(,x (&rest x))) functions)
-	 (%map-subforms ,fn ,form :functions nil ,@keys))))
+
+  (when (macroexpand 'quote-mapping env)
+    (when variables
+      (return-from %map-subforms
+	`(let ,variables
+	  (declare (ignorable ,@variables))
+	  (%map-subforms ,fn ,form :variables nil ,@keys))))
+    (when functions
+      (return-from %map-subforms
+	`(flet ,(mapcar (lambda (x) `(,x (&rest x))) functions)
+	  (%map-subforms ,fn ,form :functions nil ,@keys)))))
+
   (labels ((map-body (body &key doc variables functions)
 	   (multiple-value-bind (forms decls doc) (parse-body body doc)
 	     `(,@(when doc (list doc))
@@ -513,7 +460,7 @@
 	   (let ((funcalled (if toplevel
 				mapped-form
 				(funcall fn mapped-form env))))
-	     (if *quote-mapping*
+	     (if (macroexpand 'quote-mapping env)
 		 (quote-tree funcalled '%map-subforms)
 		 funcalled))))
     (unless (or toplevel recursive)
@@ -533,11 +480,7 @@
 	(declare (ignore function))
         (output `#',(map-lambda-subforms lambda lambda-list body)))
       (lambda-form ((lambda lambda-list . body) . forms)
-<<<<<<< HEAD
-        (output `(,(map-lambda-subforms fn recursive lambda lambda-list body)
-=======
         (output `(,(map-lambda-subforms lambda lambda-list body t)
->>>>>>> 8a44fe7994d33061f3d89f9bd902d3e117722066
 		  ,@(mapcar (lambda (x)
 			      `(%map-subforms ,fn ,x :recursive ,recursive))
 			    forms))))
@@ -548,6 +491,10 @@
 (defun map-subforms (fn form &key recursive env)
   (declare (ignore env))
   (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
+
+(defmacro macro-map-subforms (fn form &key recursive quote)
+  `(symbol-macrolet ((quote-mapping ,quote))
+     (%map-subforms ,fn ,form :recursive ,recursive :toplevel t)))
 
 
 ;;;; Examples.
@@ -647,6 +594,20 @@
     body)))
 
 (defmacro declare-ignore-1 (vars form &environment env)
+  `(macro-map-subforms
+    ,(lambda (subform e)
+       (declare (ignore e))
+       `(declare-ignore-1 ,vars ,subform))
+    (destructuring-typecase (macroexpand form env)
+      (variable-binding-form x
+	(setf x (copy-tree x))
+	(push `(declare (ignore ,@(intersection vars (binding-form-variables x))))
+	      (form-body x))
+	x)
+      (t x
+	x))))
+
+(defmacro declare-ignore-1 (vars form &environment env)
   (map-subforms
    (lambda (subform e)
      (declare (ignore e))
@@ -662,6 +623,8 @@
 (defmacro declare-ignore (vars &body body)
   (body-form (mapcar (lambda (x) `(declare-ignore-1 ,vars ,x)) body)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defmacro do-subforms ((subform form &key result recursive
 			((&environment env) (gensym) envp))
 		       &body body)
@@ -674,14 +637,22 @@
 		   :recursive ,recursive)
      ,result))
 
+(defun collect-forms (predicate form &optional env)
+  (let ((result nil))
+    (when (funcall predicate form env)
+      (push form result))
+    (do-subforms (subform form :recursive t :result (nreverse result)
+		  &environment env)
+      (when (funcall predicate subform env)
+	(push subform result)))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun form-variables (form)
-  (let ((vars nil))
-    (do-subforms (subform form :result vars :recursive t &environment env)
-      (let ((x (macroexpand subform env)))
-	(when (symbolp x)
-	  (pushnew x vars))))))
+  (flet ((variablep (form env)
+	   (and (symbolp form)
+		(not (constantp form env)))))
+    (remove-duplicates (collect-forms #'variablep form))))
 
 (defun written-variables (form)
   (let ((vars nil))
@@ -771,6 +742,19 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defun form-constants (form)
+  (remove-duplicates (collect-forms #'constantp form)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defmacro step-subforms (form)
+  `(progn
+     (format t "~&Subform: ~A" ',form)
+     (read-line)
+     (macro-map-subforms ,(lambda (subform env)
+			    (declare (ignore env))
+			    `(step-subforms ,subform))
+                         ,form)))
 (defmacro step-subforms (form)
   `(progn
      (format t "~&Subform: ~A" ',form)
@@ -1171,6 +1155,8 @@
 ;;; #+ecl ext:compiler-let
 
 ;;; #+lispworks: nothing
+
+;;; TODO: abcl, allegro, cmu, gcl, scl, (open)mcl, cormanlisp, mkcl
 
 
 ;;; Local variables:
