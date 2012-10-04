@@ -467,6 +467,7 @@
 	(output (map-flet-subforms bindings body)))
       ((or function-binding-form symbol-macrolet-form) (op bindings . body)
 	(declare (ignore body))
+        (setq bindings (second (simple)))
         `(,op ,bindings ,(output (simple))))
       (let/*-form (op bindings . body)
 	(output (map-let-subforms op bindings body)))
@@ -544,12 +545,21 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmacro mapping-subforms ((subform form &optional (env (gensym) envp))
+(defmacro mapping-subforms ((subform form
+			     &key ((&environment env) (gensym) envp))
 			    &body body)
   `(map-subforms (lambda (,subform ,env)
 		   ,@(unless envp `((declare (ignore ,env))))
 		   ,@body)
 		 ,form))
+
+(defmacro mapping-subforms* ((subform form &key recursive
+			      ((&environment env) (gensym) envp))
+			     &body body)
+  ``(macro-map-subforms ,(lambda (,subform ,env)
+			  ,@(unless envp `((declare (ignore ,env))))
+			  ,@body)
+			,,form :recursive ,,recursive :toplevel t))
 
 (defun %macroexpand-all (form symbol env &rest keys &key variables functions
 			  macros symbol-macros)
@@ -643,6 +653,12 @@
     (eval `(macrolet ((,symbol (form &rest keys &environment env)
 		       (apply #'%macroexpand-all form ',symbol env keys)))
 	     (,symbol ,form)))))
+
+(defun macroexpand-all-1 (form)
+  (multiple-value-bind (e ep) (macroexpand-1 form)
+    (if ep
+	e
+	(simple-map-subforms #'macroexpand-all-1 e))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -839,7 +855,7 @@
   `(progn
      (format t "~&Subform: ~A" ',form)
      (read-line)
-     ,(mapping-subforms (subform form env)
+     ,(mapping-subforms (subform form &environment env)
 	(declare (ignore env))
         `(step-subforms ,subform))))
 
@@ -1082,7 +1098,7 @@
   :output (flet ((f () 42))
 	    (declare (optimize (safety 3)))
 	    (macrolet ((f () 52))
-	      52)))
+	      53)))
 
 (define-map-subforms-test macrolet-and-flet
   :body (if (numberp x) (1+ x) x)
@@ -1093,7 +1109,7 @@
 	 :recursive t
   :output (macrolet ((f () 52))
 	    (flet ((f () 42)
-		   (g () 52))
+		   (g () 53))
 	      (f))))
 
 (define-map-subforms-test symbol-macrolet-and-flet
@@ -1116,7 +1132,7 @@
   :output (labels ((f () 42))
 	    (declare (optimize (safety 3)))
 	    (macrolet ((f () 52))
-	      52)))
+	      53)))
 
 (define-map-subforms-test macrolet-and-labels
   :body (if (numberp x) (1+ x) x)
