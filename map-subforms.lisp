@@ -132,6 +132,7 @@
   '(cons (and symbol (satisfies special-operator-p)) list))
 (deftype macro-form ()
   '(cons (and symbol (satisfies macro-function)) t)) ;Allow dotted lists.
+(deftype macrolet-form () '(list-of (eql macrolet) list . list))
 (deftype symbol-macrolet-form () '(list-of (eql symbol-macrolet) list . list))
 (deftype load-time-value-form () '(cons (eql load-time-value)
 				        (cons t (or null (cons t null)))))
@@ -481,13 +482,11 @@
 	(declare (ignore _))
 	(output (simple))))))
 
-(defun map-subforms (fn form &key recursive env)
-  (declare (ignore env))
+(defun map-subforms (fn form &key recursive)
   (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
 
 (defmacro macro-map-subforms (fn form &key toplevel recursive
 			      &environment env)
-
   (flet ((output (mapped-form)
 	   (if toplevel
 	       mapped-form
@@ -496,16 +495,14 @@
       (return-from macro-map-subforms (output form)))
     ;;(print (list env form (macroexpand form env)))
     (setq form (macroexpand form env))
-    (let ((mapped-form
-	   (simple-map-subforms
-	    (lambda (x) `(macro-map-subforms ,fn ,x :recursive ,recursive))
-	    form)))
-      (if toplevel
-	  mapped-form
-	  (funcall fn mapped-form env)))))
+    (output (simple-map-subforms
+	     (lambda (x) `(macro-map-subforms ,fn ,x :recursive ,recursive))
+	     form))))
 
-(defun .map-subforms (fn form &key recursive)
-  (macroexpand-all `(macro-map-subforms ,fn ,form :recursive t :toplevel t)))
+#+(or)
+(defun map-subforms (fn form &key recursive)
+  (macroexpand-all `(macro-map-subforms ,fn ,form
+		     :recursive ,recursive :toplevel t)))
 
 
 ;;;; Examples.
@@ -526,6 +523,7 @@
     ((list-of t)	(first forms))
     (t			`(progn ,@forms))))
 
+#|
 (defun remove-macrolet (form &optional e)
   (declare (ignore e))
   (handler-bind ((error (lambda (c) (return-from remove-macrolet form))))
@@ -542,6 +540,7 @@
 	 (_ (print (list :me-all form x y))))
     (remove-macrolet y)))
     ;;(map-subforms #'macroexpand-all (macroexpand form env)))
+|#
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
