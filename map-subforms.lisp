@@ -496,7 +496,6 @@
       (return-from macro-map-subforms (output form)))
     ;;(print (list env form (macroexpand form env)))
     (setq form (macroexpand form env))
-    (break)
     (let ((mapped-form
 	   (simple-map-subforms
 	    (lambda (x) `(macro-map-subforms ,fn ,x :recursive ,recursive))
@@ -553,102 +552,73 @@
 		   ,@body)
 		 ,form))
 
-(defmacro %macroexpand-all (form &environment env)
-  (destructuring-typecase (macroexpand form env)
-    ((cons (member macrolet symbol-macrolet)) (op bindings . body)
-      ;; Macro bindings remain in the expansion, but dissapear in the result.
-      `(,op ,bindings
-        ,@(rest (mapping-subforms (subform `(locally ,@body))
-		  `(%macroexpand-all ,subform)))))
-    ((cons (member let let* flet labels)) (&whole x op bindings . _)
-      (declare (ignore _))
-      ;; Lexical bindings remain in the expansion, and also in the result.
-      (if (member op '(flet labels))
-	  (setq bindings (mapcar (lambda (b) `(,(first b) ,(second b) nil))
-				 bindings))
-	  (setq bindings (mapcar (lambda (b) (if (symbolp b) b (car b)))
-				 bindings)))
-      `(,op ,bindings ,(quote-tree (mapping-subforms (subform x)
-				     `(%macroexpand-all ,subform))
-				   '%macroexpand-all)))
-    (lambda-form (&whole x (op lambda-list . body) . forms)
-      (declare (ignore op body forms))
-      `(let ,(lambda-list-variables lambda-list)
-	 ,(quote-tree (mapping-subforms (subform x)
-			 `(%macroexpand-all ,subform))
-		       '%macroexpand-all)))
-    (t x
-      ;; Everything else just goes into the result.
-      (quote-tree (mapping-subforms (subform x)
-		    `(%macroexpand-all ,subform))
-		  '%macroexpand-all))))
-(defmacro %macroexpand-all (form &rest keys &key variables functions
-			    macros symbol-macros &environment env)
+(defun %macroexpand-all (form symbol env &rest keys &key variables functions
+			  macros symbol-macros)
   (declare (ignore macros symbol-macros))
   (when variables
     (return-from %macroexpand-all
       `(let ,variables
 	 (declare (ignorable ,@variables))
-	 (%macroexpand-all ,form :variables nil ,@keys))))
+	 (,symbol ,form :variables nil ,@keys))))
   (when functions
     (return-from %macroexpand-all
       `(flet ,(mapcar (lambda (x) `(,x (&rest x))) functions)
-	 (%macroexpand-all ,form :functions nil ,@keys))))
+	 (,symbol ,form :functions nil ,@keys))))
   (labels ((map-body (body &key doc variables functions)
-	   (multiple-value-bind (forms decls doc) (parse-body body doc)
-	     `(,@(when doc (list doc))
+	     (multiple-value-bind (forms decls doc) (parse-body body doc)
+	       `(,@(when doc (list doc))
 		 ,@decls
 		 ,@(mapcar (lambda (x)
-			     `(%macroexpand-all ,x
-			       :variables ,variables :functions ,functions))
+			     `(,symbol ,x :variables ,variables
+			                  :functions ,functions))
 			   forms))))
-	 (map-let-subforms (op bindings body)
-	   (let ((variables nil))
-	     `(,op ,(mapcar (lambda (binding)
-			      (etypecase binding
-				(symbol
-				 (push binding variables)
-				 binding)
-				((cons symbol null)
-				 (push (first binding) variables)
-				 binding)
-				((cons symbol cons)
-				 (prog1 `(,(first binding)
-					   (%macroexpand-all
-					    ,(second binding)
-					    ,@(when (eq op 'let*)
-					       `(:variables ,variables))))
-				   (push (first binding) variables)))))
-			    bindings)
-		   ,@(map-body body :variables variables))))
-	 (map-flet-subforms (bindings body)
-	   `(flet ,(mapcar
-		    (lambda (binding)
-		      (destructuring-bind (name lambda-list . body) binding
-			(map-lambda-subforms name lambda-list body)))
-		    bindings)
-	      ,@(map-body body :functions (mapcar #'first bindings))))
-	 (map-lambda-subforms (op lambda-list body &optional doc)
-	   `(,op ,(mapcar (lambda (arg)
-			    (destructuring-typecase arg
-			      ((list-of t t . list) (x y . z)
-				`(,x
-				  (%macroexpand-all ,y
-				   :variables ,(lambda-list-variables
-						(ldiff lambda-list
-						       (member arg lambda-list))))
-				  ,@z))
-			      (t x
-				x)))
-			  lambda-list)
-		 ,@(map-body body :doc doc
-			     :variables (lambda-list-variables lambda-list))))
-	 (simple ()
-	   (simple-map-subforms
-	    (lambda (x) `(%macroexpand-all ,x))
-	    form))
-	 (output (mapped-form)
-	   (quote-tree mapped-form '%macroexpand-all)))
+	   (map-let-subforms (op bindings body)
+	     (let ((variables nil))
+	       `(,op ,(mapcar (lambda (binding)
+				(etypecase binding
+				  (symbol
+				   (push binding variables)
+				   binding)
+				  ((cons symbol null)
+				   (push (first binding) variables)
+				   binding)
+				  ((cons symbol cons)
+				   (prog1 `(,(first binding)
+					    (,symbol
+					     ,(second binding)
+					     ,@(when (eq op 'let*)
+						`(:variables ,variables))))
+				     (push (first binding) variables)))))
+			      bindings)
+		 ,@(map-body body :variables variables))))
+	   (map-flet-subforms (bindings body)
+	     `(flet ,(mapcar
+		      (lambda (binding)
+			(destructuring-bind (name lambda-list . body) binding
+			  (map-lambda-subforms name lambda-list body)))
+		      bindings)
+	       ,@(map-body body :functions (mapcar #'first bindings))))
+	   (map-lambda-subforms (op lambda-list body)
+	     `(,op ,(mapcar (lambda (arg)
+			      (destructuring-typecase arg
+				((list-of t t . list) (x y . z)
+				  `(,x
+				    (,symbol ,y
+				     :variables ,(lambda-list-variables
+						  (ldiff lambda-list
+							 (member arg lambda-list))))
+				    ,@z))
+				(t x
+				  x)))
+			    lambda-list)
+	       ,@(map-body body :doc t
+			   :variables (lambda-list-variables lambda-list))))
+	   (simple ()
+	     (simple-map-subforms
+	      (lambda (x) `(,symbol ,x))
+	      form))
+	   (output (mapped-form)
+	     (quote-tree mapped-form symbol)))
     ;;(print (list env form (macroexpand form env)))
     (setq form (macroexpand form env))
     (destructuring-typecase form
@@ -664,15 +634,16 @@
 	(declare (ignore function))
         (output `#',(map-lambda-subforms lambda lambda-list body)))
       (lambda-form ((lambda lambda-list . body) . forms)
-        (output `(,(map-lambda-subforms lambda lambda-list body t)
-		  ,@(mapcar (lambda (x)
-			      `(%macroexpand-all ,x))
-			    forms))))
+        (output `(,(map-lambda-subforms lambda lambda-list body)
+		  ,@(mapcar (lambda (x) `(,symbol ,x)) forms))))
       (t _
 	(declare (ignore _))
 	(output (simple))))))
 (defun macroexpand-all (form)
-  (eval `(%macroexpand-all ,form)))
+  (let ((symbol (gensym)))
+    (eval `(macrolet ((,symbol (form &rest keys &environment env)
+		       (apply #'%macroexpand-all form ',symbol env keys)))
+	     (,symbol ,form)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
