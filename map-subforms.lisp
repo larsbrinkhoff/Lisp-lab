@@ -467,7 +467,14 @@
 	(output (map-flet-subforms bindings body)))
       ((or function-binding-form symbol-macrolet-form) (op bindings . body)
 	(declare (ignore body))
-        (setq bindings (second (simple)))
+        (when (eq op 'macrolet)
+	  (setq bindings
+		(mapcar (lambda (b)
+			  (destructuring-bind (name lambda-list . body) b
+			    `(,name ,lambda-list
+			      ,@(mapcar (lambda (f) (funcall fn f env))
+					body))))
+			bindings)))
         `(,op ,bindings ,(output (simple))))
       (let/*-form (op bindings . body)
 	(output (map-let-subforms op bindings body)))
