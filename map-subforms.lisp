@@ -662,10 +662,15 @@
 	     (,symbol ,form)))))
 
 (defun macroexpand-all-1 (form)
-  (multiple-value-bind (e ep) (macroexpand-1 form)
-    (if ep
-	e
-	(simple-map-subforms #'macroexpand-all-1 e))))
+  (let ((expandp t))
+    (labels ((expand (form)
+	       (if expandp
+		   (multiple-value-bind (e ep) (macroexpand-1 form)
+		     (if ep
+			 (progn (setq expandp nil) e)
+			 (simple-map-subforms #'expand e)))
+		   form)))
+      (expand form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
