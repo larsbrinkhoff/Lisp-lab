@@ -723,11 +723,14 @@
 
 #+(or)
 (defmacro do-subforms ((subform form &key result recursive
-			((&environment env) (gensym) envp))
+			((&environment env) nil envp))
 		       &body body)
   `(progn
-     (mapping-subforms* (,subform ,form :recursive ,recursive
-			 ,@(when envp `(&environment ,env))))))
+     (eval (mapping-subforms* (,subform ,form :recursive ,recursive
+			       ,@(when envp `(&environment ,env)))
+	     ,@body
+	     ,subform))
+     ,result))
        
 (defmacro do-subforms ((subform form &key result recursive
 			((&environment env) (gensym) envp))
