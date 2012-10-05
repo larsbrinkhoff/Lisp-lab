@@ -588,7 +588,7 @@
 			     `(,symbol ,x :variables ,variables
 			                  :functions ,functions))
 			   forms))))
-	   (map-let-subforms (op bindings body)
+	   (map-let (op bindings body)
 	     (let ((variables nil))
 	       `(,op ,(mapcar (lambda (binding)
 				(etypecase binding
@@ -607,22 +607,23 @@
 				     (push (first binding) variables)))))
 			      bindings)
 		 ,@(map-body body :variables variables))))
-	   (map-flet-subforms (bindings body)
+	   (map-flet (bindings body)
 	     `(flet ,(mapcar
 		      (lambda (binding)
 			(destructuring-bind (name lambda-list . body) binding
-			  (map-lambda-subforms name lambda-list body)))
+			  (map-lambda name lambda-list body)))
 		      bindings)
 	       ,@(map-body body :functions (mapcar #'first bindings))))
-	   (map-lambda-subforms (op lambda-list body)
+	   (map-lambda (op lambda-list body)
 	     `(,op ,(mapcar (lambda (arg)
 			      (destructuring-typecase arg
 				((list-of t t . list) (x y . z)
 				  `(,x
 				    (,symbol ,y
-				     :variables ,(lambda-list-variables
-						  (ldiff lambda-list
-							 (member arg lambda-list))))
+				     :variables
+				     ,(lambda-list-variables
+				       (ldiff lambda-list
+					      (member arg lambda-list))))
 				    ,@z))
 				(t x
 				  x)))
@@ -630,9 +631,7 @@
 	       ,@(map-body body :doc t
 			   :variables (lambda-list-variables lambda-list))))
 	   (simple ()
-	     (simple-map-subforms
-	      (lambda (x) `(,symbol ,x))
-	      form))
+	     (simple-map-subforms (lambda (x) `(,symbol ,x)) form))
 	   (output (mapped-form)
 	     (quote-tree mapped-form symbol)))
     ;;(print (list env form (macroexpand form env)))
@@ -640,17 +639,17 @@
     (destructuring-typecase form
       (flet-form (op bindings . body)
 	(declare (ignore op))
-	(output (map-flet-subforms bindings body)))
+	(output (map-flet bindings body)))
       ((or function-binding-form symbol-macrolet-form) (op bindings . body)
 	(declare (ignore body))
         `(,op ,bindings ,(output (simple))))
       (let/*-form (op bindings . body)
-	(output (map-let-subforms op bindings body)))
+	(output (map-let op bindings body)))
       ((function-form lambda-expr) #'(lambda lambda-list . body)
 	(declare (ignore function))
-        (output `#',(map-lambda-subforms lambda lambda-list body)))
+        (output `#',(map-lambda lambda lambda-list body)))
       (lambda-form ((lambda lambda-list . body) . forms)
-        (output `(,(map-lambda-subforms lambda lambda-list body)
+        (output `(,(map-lambda lambda lambda-list body)
 		  ,@(mapcar (lambda (x) `(,symbol ,x)) forms))))
       (t _
 	(declare (ignore _))
@@ -693,20 +692,17 @@
     body)))
 
 (defmacro declare-ignore-1 (vars form &environment env)
-  `(macro-map-subforms
-    ,(lambda (subform e)
-       (declare (ignore e))
-       `(declare-ignore-1 ,vars ,subform))
-    ,(destructuring-typecase (macroexpand form env)
-       (variable-binding-form x
-	 (setf x (copy-tree x))
-	 (push `(declare (ignore ,@(intersection vars (binding-form-variables x))))
-	       (form-body x))
-	 x)
-       (t x
-	  x))
-    :toplevel t))
-
+  (setq form (destructuring-typecase (macroexpand form env)
+	       (variable-binding-form x
+		 (setf x (copy-tree x))
+		 (push `(declare (ignore ,@(intersection vars
+					    (binding-form-variables x))))
+		       (form-body x))
+		 x)
+	       (t x
+		 x)))
+  (mapping-subforms* (subform form)
+    `(declare-ignore-1 ,vars ,subform)))
 (defmacro declare-ignore-1 (vars form &environment env)
   (map-subforms
    (lambda (subform e)
@@ -725,6 +721,14 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+#+(or)
+(defmacro do-subforms ((subform form &key result recursive
+			((&environment env) (gensym) envp))
+		       &body body)
+  `(progn
+     (mapping-subforms* (,subform ,form :recursive ,recursive
+			 ,@(when envp `(&environment ,env))))))
+       
 (defmacro do-subforms ((subform form &key result recursive
 			((&environment env) (gensym) envp))
 		       &body body)
