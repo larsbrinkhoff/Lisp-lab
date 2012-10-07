@@ -495,17 +495,14 @@
 
 (defmacro macro-map-subforms (fn form &key toplevel recursive
 			      &environment env)
-  (flet ((output (mapped-form)
-	   (if toplevel
-	       mapped-form
-	       (funcall fn mapped-form env))))
-    (unless (or toplevel recursive)
-      (return-from macro-map-subforms (output form)))
-    ;;(print (list env form (macroexpand form env)))
-    (setq form (macroexpand form env))
-    (output (simple-map-subforms
-	     (lambda (x) `(macro-map-subforms ,fn ,x :recursive ,recursive))
-	     form))))
+  (flet ((s ()
+	   (simple-map-subforms
+	    (lambda (x) `(macro-map-subforms ,fn ,x
+			  ,@(when recursive `(:recursive t))))
+	    (macroexpand form env))))
+    (if toplevel
+	(s)
+	(funcall fn (if recursive (s) form) env))))
 
 #+(or)
 (defun map-subforms (fn form &key recursive)
@@ -567,6 +564,15 @@
 			  ,@(unless envp `((declare (ignore ,env))))
 			  ,@body)
 			,,form :recursive ,,recursive :toplevel t))
+
+(defmacro mapping-subforms** ((subform form &key recursive
+			       ((&environment env) (gensym) envp))
+			      &body body)
+  (let ((fn (gensym)))
+    `(flet ((,fn (,subform ,env)
+	      ,@(unless envp `((declare (ignore ,env))))
+	      ,@body))
+       (macro-map-subforms ,fn ,form :recursive ,recursive :toplevel t))))
 
 (defun %macroexpand-all (form symbol env &rest keys &key variables functions
 			  macros symbol-macros)
@@ -726,10 +732,10 @@
 			((&environment env) nil envp))
 		       &body body)
   `(progn
-     (eval (mapping-subforms* (,subform ,form :recursive ,recursive
+     ,(mapping-subforms* (,subform ,form :recursive ,recursive
 			       ,@(when envp `(&environment ,env)))
 	     ,@body
-	     ,subform))
+	     ,subform)
      ,result))
        
 (defmacro do-subforms ((subform form &key result recursive
@@ -737,7 +743,7 @@
 		       &body body)
   `(progn
      (map-subforms (lambda (,subform ,env)
-		     ,@(unless envp `((declare ignore ,env)))
+		     ,@(unless envp `((declare (ignore ,env))))
 		     ,@body
 		     ,subform)
 		   ,form
@@ -986,6 +992,11 @@
 					    ,@forms))))))
 	 (,fn ,@(mapcar (lambda (val) (if (symbolp val) nil (second val)))
 			bindings))))))
+
+(defmacro defexpr (name lambda-list &body body)
+  (let ((args (gensym)))
+    `(defmacro ,name (&rest ,args)
+       `(apply ,(lambda ,lambda-list ,@body) ',,args))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
