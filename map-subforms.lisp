@@ -491,13 +491,15 @@
 	(output (simple))))))
 
 (defun map-subforms (fn form &key recursive)
-  (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
+  (eval (funcall (map-form fn `(:recursive ,recursive))
+		 form
+		 :toplevel t)))
 
 ;;;
 
 (defun map-form (fn keys)
-  (lambda (form)
-    `(%map-subforms ,fn ,form ,@keys)))
+  (lambda (form &rest more-keys)
+    `(%map-subforms ,fn ,form ,@more-keys ,@keys)))
 
 (defmacro %map-subforms (fn form &rest keys &key recursive &environment env)
   (funcall fn (if recursive
