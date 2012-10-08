@@ -493,21 +493,23 @@
 (defun map-subforms (fn form &key recursive)
   (eval `(%map-subforms ,fn ,form :toplevel t :recursive ,recursive)))
 
-(defmacro macro-map-subforms (fn form &key toplevel recursive
-			      &environment env)
-  (flet ((s ()
-	   (simple-map-subforms
-	    (lambda (x) `(macro-map-subforms ,fn ,x
-			  ,@(when recursive `(:recursive t))))
-	    (macroexpand form env))))
-    (if toplevel
-	(s)
-	(funcall fn (if recursive (s) form) env))))
+;;;
 
-#+(or)
-(defun map-subforms (fn form &key recursive)
-  (macroexpand-all `(macro-map-subforms ,fn ,form
-		     :recursive ,recursive :toplevel t)))
+(defun map-form (fn keys)
+  (lambda (form)
+    `(%map-subforms ,fn ,form ,@keys)))
+
+(defmacro %map-subforms (fn form &rest keys &key recursive &environment env)
+  (funcall fn (if recursive
+		  (simple-map-subforms (map-form fn keys)
+				       (macroexpand form env))
+		  form)
+	   env))
+
+(defun map-subforms (fn form &rest keys &key recursive)
+  (declare (ignore recursive))
+  (macroexpand-all (simple-map-subforms (map-form fn keys)
+					(macroexpand form))))
 
 
 ;;;; Examples.
@@ -573,6 +575,8 @@
 	      ,@(unless envp `((declare (ignore ,env))))
 	      ,@body))
        (macro-map-subforms ,fn ,form :recursive ,recursive :toplevel t))))
+
+(defvar *macroexpand-all-hook*)
 
 (defun %macroexpand-all (form symbol env &rest keys &key variables functions
 			  macros symbol-macros)
@@ -640,8 +644,17 @@
 	     (simple-map-subforms (lambda (x) `(,symbol ,x)) form))
 	   (output (mapped-form)
 	     (quote-tree mapped-form symbol)))
-    ;;(print (list env form (macroexpand form env)))
-    (setq form (macroexpand form env))
+    (let ((*macroexpand-hook* *macroexpand-all-hook*))
+      (setq form (macroexpand form env))
+      #+(or)
+      (loop while (typep form 'macro-form) do
+	(let ((new-form (funcall *macroexpand-all-hook*
+				 (macro-function (car form) env)
+				 form
+				 env)))
+	  (if (eq form new-form)
+	      (return-from %macroexpand-all (output form))
+	      (setq form new-form)))))
     (destructuring-typecase form
       (flet-form (op bindings . body)
 	(declare (ignore op))
@@ -660,8 +673,11 @@
       (t _
 	(declare (ignore _))
 	(output (simple))))))
+
 (defun macroexpand-all (form)
-  (let ((symbol (gensym)))
+  (let ((symbol (gensym))
+	(*macroexpand-all-hook* *macroexpand-hook*)
+	(*macroexpand-hook* #'funcall))
     (eval `(macrolet ((,symbol (form &rest keys &environment env)
 		       (apply #'%macroexpand-all form ',symbol env keys)))
 	     (,symbol ,form)))))
@@ -676,6 +692,16 @@
 			 (simple-map-subforms #'expand e)))
 		   form)))
       (expand form))))
+#+(or)
+(defun macroexpand-all-1 (form)
+  (let* ((hook *macroexpand-hook*)
+	 (expandp t)
+	 (*macroexpand-hook*
+	  (lambda (fn form env)
+	    (if expandp
+		(progn (setq expandp nil) (funcall hook fn form env))
+		form))))
+    (macroexpand-all form)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
