@@ -398,13 +398,12 @@
     (return-from %map-subforms
       `(flet ,(mapcar (lambda (x) `(,x (&rest x))) functions)
 	 (%map-subforms ,fn ,form :functions nil ,@keys))))
-  (labels ((map-body (body &key doc variables functions)
+  (labels ((map-body (body &rest ks &key doc variables functions)
 	   (multiple-value-bind (forms decls doc) (parse-body body doc)
+	     (remf ks :doc)
 	     `(,@(when doc (list doc))
 		 ,@decls
-		 ,@(mapcar (lambda (x)
-			     `(%map-subforms ,fn ,x :recursive ,recursive
-			       :variables ,variables :functions ,functions))
+		 ,@(mapcar (map-form fn `(:recursive ,recursive ,@ks))
 			   forms))))
 	 (map-let-subforms (op bindings body)
 	   (let ((variables nil))
@@ -449,9 +448,7 @@
 		 ,@(map-body body :doc doc
 			     :variables (lambda-list-variables lambda-list))))
 	 (simple ()
-	   (simple-map-subforms
-	    (lambda (x) `(%map-subforms ,fn ,x :recursive ,recursive))
-	    form))
+	   (simple-map-subforms (map-form fn `(:recursive ,recursive)) form))
 	 (output (mapped-form)
 	   (quote-tree (if toplevel
 			   mapped-form
@@ -483,35 +480,35 @@
         (output `#',(map-lambda-subforms lambda lambda-list body)))
       (lambda-form ((lambda lambda-list . body) . forms)
         (output `(,(map-lambda-subforms lambda lambda-list body t)
-		  ,@(mapcar (lambda (x)
-			      `(%map-subforms ,fn ,x :recursive ,recursive))
+		  ,@(mapcar (map-form fn `(:recursive ,recursive))
 			    forms))))
       (t _
 	(declare (ignore _))
 	(output (simple))))))
 
-(defun map-subforms (fn form &key recursive)
-  (eval (funcall (map-form fn `(:recursive ,recursive))
-		 form
-		 :toplevel t)))
-
-;;;
-
 (defun map-form (fn keys)
   (lambda (form &rest more-keys)
     `(%map-subforms ,fn ,form ,@more-keys ,@keys)))
 
+(defun map-subforms (fn form &rest keys &key recursive)
+  (declare (ignore recursive))
+  (eval (funcall (map-form fn keys) form :toplevel t)))
+
+;;;
+
+(defun %%map-subforms (fn form env keys)
+  (simple-map-subforms (map-form fn keys) (macroexpand form env)))
+
 (defmacro %map-subforms (fn form &rest keys &key recursive &environment env)
-  (funcall fn (if recursive
-		  (simple-map-subforms (map-form fn keys)
-				       (macroexpand form env))
-		  form)
+  (funcall fn
+	   (if recursive
+	       (%%map-subforms fn form env keys)
+	       form)
 	   env))
 
 (defun map-subforms (fn form &rest keys &key recursive)
   (declare (ignore recursive))
-  (macroexpand-all (simple-map-subforms (map-form fn keys)
-					(macroexpand form))))
+  (macroexpand-all (%%map-subforms fn form nil keys)))
 
 
 ;;;; Examples.
