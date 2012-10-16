@@ -386,6 +386,10 @@
       (t x
 	x))))
 
+(defun map-form (fn keys &optional more-keys)
+  (lambda (form)
+    `(%map-subforms ,fn ,form ,@keys ,@more-keys)))
+
 (defmacro %map-subforms (fn form &rest keys &key toplevel recursive variables
 			 functions macros symbol-macros &environment env)
   (declare (ignore macros symbol-macros))
@@ -489,10 +493,6 @@
       (t _
 	(declare (ignore _))
 	(output (simple))))))
-
-(defun map-form (fn keys &optional more-keys)
-  (lambda (form)
-    `(%map-subforms ,fn ,form ,@keys ,@more-keys)))
 
 (defun map-subforms (fn form &rest keys &key recursive)
   (declare (ignore recursive))
