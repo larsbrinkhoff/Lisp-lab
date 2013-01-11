@@ -1,0 +1,34 @@
+Constraints:
+	- Must work with HTTP/1.0, may use HTTP/1.1.
+	- No more than one connection at a time (preferably persistant).
+	- No pipelining.
+
+Request:
+	GET <url> HTTP/1.x
+	Host: <host>
+	Connection: keep-alive
+	Cache-Control: no-cache
+	[X-B64: <data>]
+
+Response:
+	HTTP/1.x 200 OK
+	Content-Length: <n>
+	Connection: keep-alive
+	Cache-Control: no-cache
+	
+	<data>
+
+Request:
+	PUT/POST <url> HTTP/1.x
+	Host: <host>
+	Content-Length: <n>
+	Connection: keep-alive
+	Cache-Control: no-cache
+
+	<data>
+
+Response:
+	HTTP/1.x 200 OK
+	Connection: keep-alive
+	Cache-Control: no-cache
+	[X-B64: <data>]
