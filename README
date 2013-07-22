@@ -1,0 +1,15 @@
+Small bits of Lisp code that haven't evolved into their own repositories... yet.
+
+- collect.lisp : My version of the COLLECT macro.
+
+- daniels.lisp : Calculate running paces to and from VDOT according to Jack Daniels.
+
+- foptioncall.lisp : Funcall with &optional arguments.
+
+- map-subforms.lisp : Code walker.
+
+- purdy.el : Calculate Purdy points.
+
+- teapot.lisp : Dataset for the Utah Teapot.
+
+- time-syntax.lisp : Readtable with sexagesimal colon.
