@@ -562,8 +562,8 @@ GOAL:
 			   ("10 miles"	50:01)
 			   ("18517 m"	1:00:00)
 			   ("20000 m" 	1:05:26.6)
-			   ("20 km" 	1:02:21)
-			   ("half marathon" 	1:05:50)
+			   ("20 km" 	1:01:56)
+			   ("half marathon" 	1:05:12)
 			   ("25000 m" 	1:27:05.9)
 			   ("25 km" 	1:19:53)
 			   ("30000 m" 	1:45:50.0)
@@ -583,14 +583,14 @@ GOAL:
     ("1500 m" 		3:55.33)	;Ayhan-Lop, 2003
     ("1 mile" 		4:17.75)	;Jamal, 2007
     ("2000 m" 		5:30.19)	;Burka, 2009
-    ("3000 m" 		8:21.42)	;Szabo, 2002
+    ("3000 m" 		8:20.68)	;Obiri, 2014
     ("2 miles" 		8:58.58)	;Defar, 2007
     ("5000 m" 		14:11.15)	;Dibaba, 2008
     ("10000 m" 		29:53.80)	;Melkamu, 2009
     ("15 km"	 	46:28)		;Dibaba, 2009
     ("10 miles"	 	50:01)		;Radcliffe, 2003
-    ("20 km"	 	1:02:21)	;Radcliffe, 2003
-    ("half marathon" 	1:05:50)	;Keitany, 2011
+    ("20 km"	 	1:01:56)	;Kiplagat, 2014
+    ("half marathon" 	1:05:12)	;Kiplagat, 2014
     ("30 km"	 	1:36:36)	;Radcliffe, 2003
     ("marathon" 	2:15:25)))	;Radcliffe, 2003
 
@@ -681,8 +681,8 @@ GOAL:
     ("25000 m" 	1:12:25.0)	;Moses Mosop, 2011
     ("25 km" 	1:11:50)	;Samuel Kiplimo Kosgei, 2010
     ("30000 m" 	1:26:47.4)	;Moses Mosop, 2011
-    ("30 km" 	1:27:44)	;Gebreselassie/Kosgei, 2009
-    ("marathon"	2:03:23)	;Wilson Kipsang, 2013
+    ("30 km" 	1:27:36)	;Korir, 2014
+    ("marathon"	2:02:57)	;Dennis Kimetto, 2014
     ("100 km" 	6:13:33)))
 
 (defvar *mens-milennium-records*
@@ -707,8 +707,8 @@ GOAL:
     ("half marathon" 	58:23)		;Tadese, 2010
     ("21285 m" 		1:00:00)	;Gebrselassie, 2007
     ("30000 m" 		1:26:47.4)	;Mosop, 2011
-    ("30 km" 		1:27:44)	;Gebrselassie, 2009
-    ("marathon"		2:03:38)))	;Patrick Makau, 2011
+    ("30 km" 		1:27:36)	;Korir, 2014
+    ("marathon"		2:02:57)))	;Kimetto, 2014
 
 (defvar *m40-records*
   '(("60 m"	0:06.78)
